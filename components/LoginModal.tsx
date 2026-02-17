@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Role, Student } from '../types';
-import { Lock, User, KeyRound, GraduationCap, X, School, Info, Eye, EyeOff } from 'lucide-react';
+import { Lock, User, KeyRound, GraduationCap, X, School, Info, Eye, EyeOff, Database, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { testConnection } from '../services/supabase';
 
 interface LoginModalProps {
   isOpen: boolean;
@@ -26,6 +27,10 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [showStudentPass, setShowStudentPass] = useState(false);
 
+  // Connection Test State
+  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
+  const [connectionMsg, setConnectionMsg] = useState('');
+
   if (!isOpen) return null;
 
   const handleAdminLogin = (e: React.FormEvent) => {
@@ -48,6 +53,19 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
     } else {
       setError('NIS atau password salah. Hubungi guru jika lupa.');
     }
+  };
+
+  const runConnectionTest = async () => {
+      setConnectionStatus('LOADING');
+      const result = await testConnection();
+      
+      if (result.success) {
+          setConnectionStatus('SUCCESS');
+          setConnectionMsg(result.message);
+      } else {
+          setConnectionStatus('ERROR');
+          setConnectionMsg(result.message);
+      }
   };
 
   return (
@@ -180,6 +198,40 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
                     </button>
                 </form>
             )}
+
+            {/* CONNECTION TEST UTILITY */}
+            <div className="mt-6 pt-4 border-t border-slate-100 text-center">
+                <p className="text-xs text-slate-400 mb-2">Mengalami kendala data tidak muncul?</p>
+                
+                {connectionStatus === 'IDLE' && (
+                    <button 
+                        onClick={runConnectionTest}
+                        className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1.5 mx-auto bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200 hover:border-indigo-200 transition-all"
+                    >
+                        <Database size={12} /> Cek Koneksi Database
+                    </button>
+                )}
+
+                {connectionStatus === 'LOADING' && (
+                    <span className="text-xs text-indigo-500 flex items-center justify-center gap-1.5">
+                        <Loader2 size={12} className="animate-spin"/> Menghubungkan...
+                    </span>
+                )}
+
+                {connectionStatus === 'SUCCESS' && (
+                    <div className="text-xs text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100 flex flex-col items-center">
+                         <span className="font-bold flex items-center gap-1"><CheckCircle size={12}/> Koneksi Berhasil!</span>
+                         <span className="text-[10px] mt-0.5">Jika data masih kosong, cek RLS Policies di Supabase.</span>
+                    </div>
+                )}
+
+                {connectionStatus === 'ERROR' && (
+                    <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-left">
+                        <span className="font-bold flex items-center gap-1 mb-1"><AlertTriangle size={12}/> Koneksi Gagal</span>
+                        <p className="break-all">{connectionMsg}</p>
+                    </div>
+                )}
+            </div>
         </div>
       </div>
     </div>
