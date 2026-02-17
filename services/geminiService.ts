@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 
-const MODEL_NAME = 'gemini-3-flash-preview';
+const MODEL_NAME = 'gemini-1.5-flash'; // Updated to 1.5 Flash for better document handling
 
 // Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
@@ -105,14 +105,15 @@ export const generateModuleMetadata = async (title: string, contentSnippet: stri
 };
 
 /**
- * Generates Quiz Questions based on context, type, difficulty and count.
+ * Generates Quiz Questions based on context AND attached files.
  */
 export const generateQuizQuestions = async (
   title: string, 
   contentContext: string, 
   type: 'MULTIPLE_CHOICE' | 'ESSAY', 
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
-  count: number
+  count: number,
+  files?: { mimeType: string; data: string }[] // New Parameter for Files
 ): Promise<Question[] | null> => {
   const ai = getAiClient();
 
@@ -192,20 +193,20 @@ export const generateQuizQuestions = async (
         `;
     }
 
-    const prompt = `
+    const promptText = `
       Bertindaklah sebagai Guru Ahli Pembuat Soal Ujian.
       
       TOPIK UTAMA: "${title}"
       
-      BAHAN SUMBER (CONTEXT):
+      KONTEKS TAMBAHAN:
       "${contentContext}"
 
       INSTRUKSI:
-      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan BAHAN SUMBER di atas.
+      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan DOKUMEN YANG DILAMPIRKAN (Jika ada) dan konteks di atas.
       
       PENTING:
-      1. Jika Bahan Sumber sangat singkat, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}" untuk memperkaya soal, NAMUN tetap relevan.
-      2. Jangan membuat soal yang jawabannya tidak bisa ditemukan atau disimpulkan dari logika topik tersebut.
+      1. Utamakan informasi dari dokumen yang dilampirkan.
+      2. Jika dokumen tidak terbaca, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}".
       3. Bahasa Indonesia formal dan akademis.
 
       ${difficultyPrompt}
@@ -213,12 +214,30 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
+    // Construct Payload with Files
+    const parts: any[] = [];
+    
+    // Add Files first (if any)
+    if (files && files.length > 0) {
+        files.forEach(f => {
+            parts.push({
+                inlineData: {
+                    mimeType: f.mimeType,
+                    data: f.data
+                }
+            });
+        });
+    }
+
+    // Add Text Prompt
+    parts.push({ text: promptText });
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: prompt,
+      contents: { role: 'user', parts: parts }, // Correct structure for mixed content
       config: {
         responseMimeType: "application/json",
-        temperature: 0.5, // Lower temperature to be more deterministic/relevant
+        temperature: 0.4, 
       }
     });
 
@@ -227,7 +246,7 @@ export const generateQuizQuestions = async (
     
     const parsedQuestions = JSON.parse(text);
 
-    // Post-process: Simple mapping without image generation logic
+    // Post-process
     const processedQuestions = parsedQuestions.map((q: any) => {
         return {
             id: q.id || `gen-${Date.now()}-${Math.random()}`,
@@ -252,10 +271,9 @@ export const generateQuizQuestions = async (
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
   const ai = getAiClient();
 
-  // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
     await mockDelay();
-    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi. Silakan masukkan API Key Anda di menu Pengaturan (ikon gerigi) di pojok kanan atas agar saya bisa menjawab dengan cerdas sesuai materi.`;
+    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi.`;
   }
 
   try {
@@ -275,6 +293,6 @@ export const askAboutModule = async (moduleTitle: string, moduleContext: string,
     return response.text;
   } catch (error) {
     console.error("Error asking Gemini:", error);
-    return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya (Mungkin API Key tidak valid atau kuota habis). Coba cek pengaturan key Anda.";
+    return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya.";
   }
 };

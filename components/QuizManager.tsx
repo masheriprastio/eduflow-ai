@@ -109,10 +109,18 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
       );
   };
 
+  // Helper to parse data URL
+  const parseDataUrl = (dataUrl: string) => {
+    const matches = dataUrl.match(/^data:(.+);base64,(.+)$/);
+    if (matches && matches.length === 3) {
+      return { mimeType: matches[1], data: matches[2] };
+    }
+    return null;
+  };
+
   const handleAiGenerate = async () => {
     if (!selectedModuleId) return;
     
-    // Validate sources
     if (selectedSourceModules.length === 0) {
         alert("Pilih minimal satu materi sumber untuk generate soal.");
         return;
@@ -125,32 +133,49 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
     const combinedTitles = sourceModules.map(m => m.title).join(', ');
     
     let combinedContext = `Gabungan Materi dari: ${combinedTitles}.\n\n`;
+    const filesToUpload: { mimeType: string; data: string }[] = [];
+
     sourceModules.forEach((m, idx) => {
-        combinedContext += `[Materi ${idx+1}: ${m.title}]\nDeskripsi: ${m.description}\nIsi: ${m.aiSummary || '-'}\n\n`;
+        combinedContext += `[Materi ${idx+1}: ${m.title}]\nDeskripsi: ${m.description}\nRingkasan: ${m.aiSummary || '-'}\n\n`;
+        
+        // Extract File Data if available (PDF/Doc)
+        if (m.fileUrl && m.fileUrl.startsWith('data:')) {
+            const parsed = parseDataUrl(m.fileUrl);
+            if (parsed) {
+                // Only push if it's a supported type (PDF or Image, usually)
+                filesToUpload.push(parsed);
+            }
+        }
     });
 
-    const generatedQuestions = await generateQuizQuestions(
-        combinedTitles, // Pass combined title
-        combinedContext, 
-        aiConfig.type,
-        aiConfig.difficulty,
-        aiConfig.count
-    );
+    try {
+        const generatedQuestions = await generateQuizQuestions(
+            combinedTitles, 
+            combinedContext, 
+            aiConfig.type,
+            aiConfig.difficulty,
+            aiConfig.count,
+            filesToUpload // Pass files to AI
+        );
 
-    setIsGeneratingAi(false);
-
-    if (generatedQuestions && generatedQuestions.length > 0) {
-        const newQuestions = generatedQuestions.map(q => ({
-            ...q,
-            id: Date.now().toString() + Math.random().toString(36).substr(2, 5)
-        }));
-        
-        const updatedList = [...questions, ...newQuestions];
-        setQuestions(updatedList);
-        saveToModule(updatedList); // Auto-save AI questions
-        showToast(`${newQuestions.length} soal AI dari ${selectedSourceModules.length} materi berhasil ditambahkan!`);
-    } else {
-        alert("Gagal membuat soal. Coba lagi atau kurangi jumlah soal.");
+        if (generatedQuestions && generatedQuestions.length > 0) {
+            const newQuestions = generatedQuestions.map(q => ({
+                ...q,
+                id: Date.now().toString() + Math.random().toString(36).substr(2, 5)
+            }));
+            
+            const updatedList = [...questions, ...newQuestions];
+            setQuestions(updatedList);
+            saveToModule(updatedList); // Auto-save AI questions
+            showToast(`${newQuestions.length} soal AI (dari ${filesToUpload.length > 0 ? 'Dokumen PDF' : 'Teks Ringkasan'}) berhasil ditambahkan!`);
+        } else {
+            alert("Gagal membuat soal. Pastikan API Key valid atau kurangi jumlah soal.");
+        }
+    } catch (e) {
+        console.error(e);
+        alert("Terjadi kesalahan saat menghubungi AI.");
+    } finally {
+        setIsGeneratingAi(false);
     }
   };
 
@@ -167,18 +192,15 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
         type: qType,
         question: qText,
         imageUrl: qImageUrl || undefined,
-        // Ensure options are processed correctly based on current state
         options: qType === 'MULTIPLE_CHOICE' ? qOptions.map(o => o.trim()).filter(o => o !== '') : undefined,
         correctAnswer: qCorrect
     };
     
-    // Check minimal options for Multiple Choice
     if (qType === 'MULTIPLE_CHOICE' && (!questionPayload.options || questionPayload.options.length < 2)) {
         alert("Pilihan ganda minimal harus memiliki 2 opsi jawaban.");
         return;
     }
 
-    // Determine new list state
     let newQuestionsList: Question[] = [];
     if (editingQuestionId) {
         newQuestionsList = questions.map(q => q.id === editingQuestionId ? questionPayload : q);
@@ -188,24 +210,18 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
         showToast('Soal ditambahkan ke daftar!');
     }
 
-    // Update Local State
     setQuestions(newQuestionsList);
-    
-    // AUTO-SAVE to Parent Module to prevent data loss
     saveToModule(newQuestionsList);
     
     if (closeForm) {
         resetQuestionForm();
     } else {
-        // Reset fields but keep form open for next input
         setEditingQuestionId(null);
         setQText('');
         setQImageUrl('');
         setQOptions(['', '', '', '']);
         setQCorrect('');
         if(fileInputRef.current) fileInputRef.current.value = '';
-        
-        // Scroll to top of form
         const formContainer = document.querySelector('#form-scroll-container');
         if(formContainer) formContainer.scrollTop = 0;
     }
@@ -217,26 +233,28 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
     setQText(q.question);
     setQImageUrl(q.imageUrl || '');
     if (q.type === 'MULTIPLE_CHOICE' && q.options) {
-        // Use existing options length, default to 4 empty if none
         setQOptions(q.options.length > 0 ? [...q.options] : ['', '', '', '']);
     } else {
         setQOptions(['', '', '', '']);
     }
     setQCorrect(q.correctAnswer || '');
-    
     setIsFormOpen(true);
   };
 
   const handleDeleteQuestion = (id: string) => {
-      // Trigger Custom Modal instead of window.confirm
       setQuestionToDelete(id);
   };
 
   const confirmDeleteQuestion = () => {
       if (questionToDelete) {
-          const newQuestions = questions.filter(q => q.id !== questionToDelete);
-          setQuestions(newQuestions);
-          saveToModule(newQuestions); // Auto-save deletion
+          // Use functional update to ensure we have latest state
+          setQuestions(currentQuestions => {
+              const newQuestions = currentQuestions.filter(q => q.id !== questionToDelete);
+              // Save to module inside callback or right after to ensure sync
+              saveToModule(newQuestions);
+              return newQuestions;
+          });
+          
           setQuestionToDelete(null);
           showToast('Soal berhasil dihapus');
       }
@@ -263,22 +281,19 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   };
 
   const handleDeleteOption = (index: number) => {
-    if (qOptions.length <= 2) return; // Maintain minimal 2 options
+    if (qOptions.length <= 2) return; 
     const newOpts = [...qOptions];
     newOpts.splice(index, 1);
     setQOptions(newOpts);
   };
 
-  // --- FILE UPLOAD HANDLER ---
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-        // Check size (limit to 2MB for demo performance)
         if (file.size > 2 * 1024 * 1024) {
             alert("Ukuran file terlalu besar. Maksimal 2MB.");
             return;
         }
-
         const reader = new FileReader();
         reader.onloadend = () => {
             setQImageUrl(reader.result as string);
@@ -295,7 +310,6 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       
-      {/* Toast Notification */}
       {tempSuccessMsg && (
         <div className="absolute top-6 left-1/2 -translate-x-1/2 z-[80] bg-emerald-600 text-white px-6 py-3 rounded-full shadow-lg font-bold flex items-center gap-2 animate-in slide-in-from-top-5 fade-out duration-300">
             <Check size={18} /> {tempSuccessMsg}
@@ -494,7 +508,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                             Generator Soal AI (Multi-Sumber)
                                         </h4>
                                         <p className="text-indigo-100 text-sm mt-1 mb-3">
-                                            Pilih materi sumber, tentukan level, dan biarkan AI membuat soal.
+                                            Pilih materi sumber (Centang). Jika materi memiliki file PDF/Doc, AI akan membacanya.
                                         </p>
                                         
                                         {/* Source Selection */}
