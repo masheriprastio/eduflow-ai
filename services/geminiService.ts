@@ -24,25 +24,38 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 };
 
 // Helper to get AI client safely inside functions
-const getAiClient = () => {
-  // Gunakan getEnv agar tidak crash di browser yang tidak memiliki 'process'
+// Returns NULL if no key is found (triggering Mock Mode)
+const getAiClient = (): GoogleGenAI | null => {
   const apiKey = getEnv('VITE_API_KEY', 'REACT_APP_API_KEY') || getEnv('API_KEY');
   
-  if (!apiKey) {
-      console.warn("Gemini API Key missing!");
-      // Kembalikan dummy agar tidak crash saat init, error akan muncul saat generateContent dipanggil
-      return new GoogleGenAI({ apiKey: 'dummy-key' });
+  if (!apiKey || apiKey === 'dummy-key') {
+      console.warn("Gemini API Key missing! Using Mock Mode.");
+      return null;
   }
   
   return new GoogleGenAI({ apiKey });
 };
 
+// --- MOCK GENERATORS (FALLBACKS) ---
+
+const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1500));
+
 /**
  * Generates a summary and tags for a learning module.
  */
 export const generateModuleMetadata = async (title: string, contentSnippet: string) => {
+  const ai = getAiClient();
+
+  // MOCK MODE (Jika API Key tidak ada)
+  if (!ai) {
+    await mockDelay();
+    return {
+      summary: `(Mode Demo AI) Ini adalah ringkasan otomatis simulasi untuk materi "${title}". Dalam mode produksi dengan API Key aktif, bagian ini akan menjelaskan konten secara detail.`,
+      tags: ["Demo", "Belajar", "Simulasi", "Materi"]
+    };
+  }
+
   try {
-    const ai = getAiClient();
     const prompt = `
       Saya adalah seorang Admin di sistem pembelajaran. Saya baru saja mengunggah materi dengan judul: "${title}".
       Konteks atau isi singkatnya adalah: "${contentSnippet}".
@@ -71,7 +84,11 @@ export const generateModuleMetadata = async (title: string, contentSnippet: stri
     return JSON.parse(text) as { summary: string; tags: string[] };
   } catch (error) {
     console.error("Error generating metadata:", error);
-    return null;
+    // Fallback on error
+    return {
+       summary: "Gagal menghasilkan ringkasan AI. Pastikan koneksi internet stabil.",
+       tags: ["Manual", "Error"]
+    };
   }
 };
 
@@ -85,8 +102,27 @@ export const generateQuizQuestions = async (
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
   count: number
 ): Promise<Question[] | null> => {
+  const ai = getAiClient();
+
+  // MOCK MODE (Jika API Key tidak ada)
+  if (!ai) {
+    await mockDelay();
+    const mockQuestions: Question[] = Array.from({ length: count }).map((_, i) => ({
+      id: `mock-q-${Date.now()}-${i}`,
+      type: type,
+      question: `(Soal Demo AI ${i+1}) Jelaskan konsep dasar dari materi ${title}? [Simulasi ${difficulty}]`,
+      options: type === 'MULTIPLE_CHOICE' ? [
+        "Jawaban Benar (Pilihan A)",
+        "Pengecoh 1 (Pilihan B)",
+        "Pengecoh 2 (Pilihan C)",
+        "Pengecoh 3 (Pilihan D)"
+      ] : undefined,
+      correctAnswer: type === 'MULTIPLE_CHOICE' ? "Jawaban Benar (Pilihan A)" : "Ini adalah kunci jawaban simulasi untuk soal esai."
+    }));
+    return mockQuestions;
+  }
+
   try {
-    const ai = getAiClient();
     let formatInstruction = "";
     
     if (type === 'MULTIPLE_CHOICE') {
@@ -195,13 +231,21 @@ export const generateQuizQuestions = async (
  * Allows a student to ask a question about a specific module.
  */
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
+  const ai = getAiClient();
+
+  // MOCK MODE (Jika API Key tidak ada)
+  if (!ai) {
+    await mockDelay();
+    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi.\n\nAnda bertanya tentang: "${question}" pada materi "${moduleTitle}".\n\nJawaban simulasi: Materi ini sangat penting untuk dipelajari lebih lanjut. Silakan baca dokumen lengkapnya untuk detail lebih akurat.`;
+  }
+
   try {
-    const ai = getAiClient();
     const prompt = `
-      Anda adalah tutor AI.
+      Anda adalah tutor AI yang ramah dan pintar.
       Konteks modul: "${moduleTitle}" - "${moduleContext}".
       Pertanyaan Siswa: "${question}"
-      Jawab maksimal 3 paragraf pendek.
+      
+      Jawablah dengan bahasa Indonesia yang mudah dimengerti siswa. Maksimal 3 paragraf pendek.
     `;
 
     const response = await ai.models.generateContent({
