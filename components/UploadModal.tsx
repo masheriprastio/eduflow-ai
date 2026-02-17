@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { ModuleCategory } from '../types';
 import { generateModuleMetadata } from '../services/geminiService';
-import { X, Upload, Sparkles, FileText, CheckCircle, Users } from 'lucide-react';
+import { X, Upload, Sparkles, FileText, CheckCircle, Users, AlertTriangle } from 'lucide-react';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -18,6 +18,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
   const [file, setFile] = useState<File | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [aiData, setAiData] = useState<{ summary: string; tags: string[] } | null>(null);
+  const [isProcessingFile, setIsProcessingFile] = useState(false);
   
   // Target Class State
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
@@ -36,7 +37,13 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setFile(e.target.files[0]);
+      const selectedFile = e.target.files[0];
+      // Limit file size to 3MB for Supabase storage (Idealnya pakai Storage bucket, tapi Base64 cukup untuk demo text/pdf kecil)
+      if (selectedFile.size > 3 * 1024 * 1024) {
+          alert("Ukuran file terlalu besar! Maksimal 3MB untuk penyimpanan database langsung.");
+          return;
+      }
+      setFile(selectedFile);
     }
   };
 
@@ -56,30 +63,49 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
       );
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const convertFileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = error => reject(error);
+    });
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !title) return;
 
-    const fileUrl = URL.createObjectURL(file);
+    setIsProcessingFile(true);
 
-    onUpload({
-      title,
-      description,
-      category,
-      fileUrl,
-      fileName: file.name,
-      aiSummary: aiData?.summary || '',
-      tags: aiData?.tags || [],
-      targetClasses: selectedClasses.length > 0 ? selectedClasses : undefined, // Send undefined if empty (public)
-    });
-    
-    // Reset form
-    setTitle('');
-    setDescription('');
-    setFile(null);
-    setAiData(null);
-    setSelectedClasses([]);
-    onClose();
+    try {
+        // Convert file to Base64 string to store in Supabase
+        const fileBase64 = await convertFileToBase64(file);
+
+        onUpload({
+            title,
+            description,
+            category,
+            fileUrl: fileBase64, // Stored as string in DB, visible to all devices
+            fileName: file.name,
+            aiSummary: aiData?.summary || '',
+            tags: aiData?.tags || [],
+            targetClasses: selectedClasses.length > 0 ? selectedClasses : undefined,
+        });
+        
+        // Reset form
+        setTitle('');
+        setDescription('');
+        setFile(null);
+        setAiData(null);
+        setSelectedClasses([]);
+        onClose();
+    } catch (error) {
+        console.error("Error processing file", error);
+        alert("Gagal memproses file.");
+    } finally {
+        setIsProcessingFile(false);
+    }
   };
 
   return (
@@ -116,7 +142,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                 ) : (
                   <>
                     <p className="text-sm font-medium text-slate-800">Klik untuk pilih file</p>
-                    <p className="text-xs text-slate-500 mt-1">atau tarik file ke sini</p>
+                    <p className="text-xs text-slate-500 mt-1">atau tarik file ke sini (Max 3MB)</p>
                   </>
                 )}
               </div>
@@ -225,9 +251,13 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
               )}
             </div>
             
-            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-xs text-blue-700 flex items-center gap-2">
-                <FileText size={16}/>
-                Info: Pembuatan soal kuis dapat dilakukan di menu "Kelola Kuis" setelah materi diunggah.
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-xs text-blue-700 flex flex-col gap-1">
+                <div className="flex items-center gap-2 font-bold">
+                    <FileText size={16}/>
+                    Info Penting:
+                </div>
+                <p>1. Pembuatan soal kuis dapat dilakukan di menu "Kelola Kuis" setelah diunggah.</p>
+                <p>2. File akan disimpan di database agar bisa diakses siswa dari perangkat lain.</p>
             </div>
 
           </form>
@@ -244,9 +274,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
           <button 
             type="submit" 
             form="upload-form"
-            className="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95"
+            disabled={isProcessingFile}
+            className="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-70 disabled:scale-100"
           >
-            Unggah Materi
+            {isProcessingFile ? 'Sedang Mengunggah...' : 'Unggah Materi'}
           </button>
         </div>
       </div>

@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.39.3';
 
 // Helper aman untuk membaca Environment Variables (Mendukung Vite & CRA/Node)
 const getEnv = (key: string, fallbackKey?: string): string => {

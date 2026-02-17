@@ -1,11 +1,40 @@
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
+// Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
+const getEnv = (key: string, fallbackKey?: string): string => {
+  let value = '';
+  try {
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env) {
+         // @ts-ignore
+        value = import.meta.env[key] || (fallbackKey ? import.meta.env[fallbackKey] : '');
+    }
+  } catch (e) {}
+  if (!value) {
+    try {
+        if (typeof process !== 'undefined' && process.env) {
+            value = process.env[key] || (fallbackKey ? process.env[fallbackKey] : '') || '';
+        }
+    } catch (e) {}
+  }
+  return value;
+};
+
 // Helper to get AI client safely inside functions
 const getAiClient = () => {
-  return new GoogleGenAI({ apiKey: process.env.API_KEY });
+  // Gunakan getEnv agar tidak crash di browser yang tidak memiliki 'process'
+  const apiKey = getEnv('VITE_API_KEY', 'REACT_APP_API_KEY') || getEnv('API_KEY');
+  
+  if (!apiKey) {
+      console.warn("Gemini API Key missing!");
+      // Kembalikan dummy agar tidak crash saat init, error akan muncul saat generateContent dipanggil
+      return new GoogleGenAI({ apiKey: 'dummy-key' });
+  }
+  
+  return new GoogleGenAI({ apiKey });
 };
 
 /**
