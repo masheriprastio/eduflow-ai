@@ -1,0 +1,5 @@
+{
+  "name": "EduFlow AI",
+  "description": "A modern Learning Management System where Admins can upload modules with AI-powered summaries, and Students can learn and interact with materials.",
+  "requestFramePermissions": []
+}
