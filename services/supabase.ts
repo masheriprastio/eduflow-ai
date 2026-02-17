@@ -29,26 +29,29 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 const supabaseUrl = getEnv('VITE_SUPABASE_URL', 'REACT_APP_SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY', 'REACT_APP_SUPABASE_ANON_KEY');
 
-if (!supabaseUrl || !supabaseKey) {
-  console.warn("⚠️ Supabase Config Missing! Pastikan Anda sudah setting Environment Variables (VITE_SUPABASE_URL atau REACT_APP_SUPABASE_URL).");
+const isKeyValid = supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co';
+
+if (!isKeyValid) {
+  console.warn("⚠️ Supabase Config Missing or Invalid! App running in Demo Mode.");
 }
 
-// Gunakan dummy URL jika kosong agar aplikasi TIDAK CRASH (Blank Screen),
-// meskipun nanti request data akan gagal, setidaknya UI bisa muncul.
-const validUrl = supabaseUrl || 'https://placeholder.supabase.co';
-const validKey = supabaseKey || 'placeholder-key';
+// Gunakan dummy URL jika kosong agar aplikasi TIDAK CRASH
+const validUrl = isKeyValid ? supabaseUrl : 'https://placeholder.supabase.co';
+const validKey = isKeyValid ? supabaseKey : 'placeholder-key';
 
 // Initialize Supabase
 export const supabase = createClient(validUrl, validKey);
 
+// Export helper status
+export const isSupabaseConfigured = () => isKeyValid;
+
 /**
  * Fungsi sederhana untuk mengecek koneksi ke Supabase.
- * Mencoba mengambil data dari tabel 'modules' (walaupun kosong).
  */
 export const testConnection = async () => {
   try {
-    if (!supabaseUrl || !supabaseKey) {
-        return { success: false, message: "Environment Variables belum terdeteksi. Cek console log." };
+    if (!isKeyValid) {
+        return { success: false, message: "Mode Offline: API Key belum disetting." };
     }
 
     const { data, error } = await supabase.from('modules').select('count').limit(1);
