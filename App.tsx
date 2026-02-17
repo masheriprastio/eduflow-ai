@@ -23,90 +23,89 @@ import {
   CheckCircle2,
   Clock,
   ArrowRight,
-  Trash2
+  Trash2,
+  Database,
+  Loader2
 } from 'lucide-react';
 
-// Seed Data for Classes
-const INITIAL_CLASSES: ClassGroup[] = [
-  { id: 'c1', name: '10-A', description: 'Kelas 10 Unggulan' },
-  { id: 'c2', name: '10-B', description: 'Kelas 10 Reguler' },
-  { id: 'c3', name: '11-A', description: 'Kelas 11 Sains' },
-  { id: 'c4', name: '12-A', description: 'Kelas 12 Persiapan Ujian' }
-];
-
-// Seed Data for Modules
-const INITIAL_MODULES: LearningModule[] = [
-  {
-    id: '1',
-    title: 'Pengantar Kalkulus Diferensial',
-    description: 'Membahas konsep dasar limit, turunan, dan aplikasinya dalam kehidupan sehari-hari.',
-    category: ModuleCategory.MATHEMATICS,
-    uploadDate: new Date().toISOString(),
-    tags: ['Kalkulus', 'Matematika Dasar', 'Limit'],
-    aiSummary: 'Pelajari dasar-dasar perubahan laju sesaat melalui konsep limit dan turunan yang menjadi pondasi analisis matematika modern.',
-    fileName: 'kalkulus_dasar.pdf',
-    targetClasses: ['11-A', '12-A'] // Example: Only for senior classes
-  },
-  {
-    id: '2',
-    title: 'Dasar Pemrograman Python',
-    description: 'Modul praktis belajar bahasa pemrograman Python untuk analisis data.',
-    category: ModuleCategory.TECHNOLOGY,
-    uploadDate: new Date().toISOString(),
-    tags: ['Coding', 'Python', 'Data Science'],
-    aiSummary: 'Kuasai sintaks dasar Python yang ramah pemula untuk memulai perjalanan karir Anda di dunia Data Science dan otomatisasi.',
-    fileName: 'python_101.ipynb'
-    // No targetClasses means Public for all
-  }
-];
-
-// Seed Data for Students (Updated to use 'classes' array)
-const INITIAL_STUDENTS: Student[] = [
-    { nis: '12345', name: 'Ahmad Dani', classes: ['10-A', '11-A'], password: 'password', needsPasswordChange: true, ipAddress: '192.168.1.10', lastLogin: new Date(Date.now() - 86400000).toISOString() },
-    { nis: '54321', name: 'Siti Aminah', classes: ['10-B'], password: 'password', needsPasswordChange: true, ipAddress: '192.168.1.15', lastLogin: new Date(Date.now() - 3600000).toISOString() },
-    { nis: '11223', name: 'Budi Santoso', classes: [], password: 'password', ipAddress: undefined, lastLogin: undefined } // Unassigned student
-];
+// --- SUPABASE IMPORTS ---
+import { supabase } from './services/supabase';
 
 const App: React.FC = () => {
   const [role, setRole] = useState<Role>('GUEST');
   const [currentUser, setCurrentUser] = useState<Student | any>(null); 
+  const [isLoadingData, setIsLoadingData] = useState(true);
   
-  // --- PERSISTENT STATE INITIALIZATION ---
-  // We initialize state from LocalStorage if available, otherwise use Seed Data.
-  // This fixes the issue where data (like password changes) is lost on refresh.
+  // --- REAL-TIME DATABASE STATE ---
+  const [classes, setClasses] = useState<ClassGroup[]>([]);
+  const [modules, setModules] = useState<LearningModule[]>([]);
+  const [students, setStudents] = useState<Student[]>([]);
+  const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
+  const [manualGrades, setManualGrades] = useState<ManualGrade[]>([]);
   
-  const [classes, setClasses] = useState<ClassGroup[]>(() => {
-      const saved = localStorage.getItem('eduflow_classes');
-      return saved ? JSON.parse(saved) : INITIAL_CLASSES;
-  });
-
-  const [modules, setModules] = useState<LearningModule[]>(() => {
-      const saved = localStorage.getItem('eduflow_modules');
-      return saved ? JSON.parse(saved) : INITIAL_MODULES;
-  });
-
-  const [students, setStudents] = useState<Student[]>(() => {
-      const saved = localStorage.getItem('eduflow_students');
-      return saved ? JSON.parse(saved) : INITIAL_STUDENTS;
-  });
-
-  const [quizResults, setQuizResults] = useState<QuizResult[]>(() => {
-      const saved = localStorage.getItem('eduflow_results');
-      return saved ? JSON.parse(saved) : [];
-  });
-
-  const [manualGrades, setManualGrades] = useState<ManualGrade[]>(() => {
-      const saved = localStorage.getItem('eduflow_grades');
-      return saved ? JSON.parse(saved) : [];
-  });
+  // --- SUPABASE DATA FETCHING & LISTENERS ---
   
-  // --- STATE PERSISTENCE EFFECTS ---
-  // Save to LocalStorage whenever state changes
-  useEffect(() => { localStorage.setItem('eduflow_classes', JSON.stringify(classes)); }, [classes]);
-  useEffect(() => { localStorage.setItem('eduflow_modules', JSON.stringify(modules)); }, [modules]);
-  useEffect(() => { localStorage.setItem('eduflow_students', JSON.stringify(students)); }, [students]);
-  useEffect(() => { localStorage.setItem('eduflow_results', JSON.stringify(quizResults)); }, [quizResults]);
-  useEffect(() => { localStorage.setItem('eduflow_grades', JSON.stringify(manualGrades)); }, [manualGrades]);
+  const fetchAllData = async () => {
+      // Helper to fetch data safely
+      const fetchTable = async (table: string, setter: React.Dispatch<React.SetStateAction<any[]>>, orderBy = 'created_at') => {
+          const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false });
+          if (error) console.error(`Error fetching ${table}:`, error);
+          else setter(data || []);
+      };
+
+      await Promise.all([
+          fetchTable('classes', setClasses),
+          fetchTable('modules', setModules, 'uploadDate'), // Order by uploadDate
+          fetchTable('students', setStudents),
+          fetchTable('results', setQuizResults, 'submittedAt'),
+          fetchTable('grades', setManualGrades, 'date')
+      ]);
+      
+      setIsLoadingData(false);
+  };
+
+  useEffect(() => {
+    // 1. Initial Fetch
+    fetchAllData();
+
+    // 2. Setup Realtime Subscription
+    // Supabase allows listening to all changes in the 'public' schema
+    const channel = supabase.channel('public-db-changes')
+        .on(
+            'postgres_changes', 
+            { event: '*', schema: 'public' }, 
+            (payload) => {
+                // Determine which table changed and update local state accordingly
+                // For simplicity in this demo, we can just re-fetch the specific table or all data.
+                // Optimally, we would append/update/remove from state array.
+                // Let's do a quick re-fetch of the specific table to ensure consistency.
+                const table = payload.table;
+                console.log('Change detected in:', table);
+                
+                if (table === 'classes') {
+                    supabase.from('classes').select('*').order('created_at', { ascending: false })
+                        .then(({data}) => setClasses(data || []));
+                } else if (table === 'modules') {
+                     supabase.from('modules').select('*').order('uploadDate', { ascending: false })
+                        .then(({data}) => setModules(data || []));
+                } else if (table === 'students') {
+                     supabase.from('students').select('*').order('created_at', { ascending: false })
+                        .then(({data}) => setStudents(data || []));
+                } else if (table === 'results') {
+                     supabase.from('results').select('*').order('submittedAt', { ascending: false })
+                        .then(({data}) => setQuizResults(data || []));
+                } else if (table === 'grades') {
+                     supabase.from('grades').select('*').order('date', { ascending: false })
+                        .then(({data}) => setManualGrades(data || []));
+                }
+            }
+        )
+        .subscribe();
+
+    return () => {
+        supabase.removeChannel(channel);
+    };
+  }, []);
 
 
   // View State: 'MODULES' (Materi) or 'EXAMS' (Ujian Harian)
@@ -129,7 +128,7 @@ const App: React.FC = () => {
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
     isOpen: boolean;
     type: 'MODULE' | 'STUDENT';
-    id: string;
+    id: string; 
     details?: string;
   }>({ isOpen: false, type: 'MODULE', id: '' });
 
@@ -140,8 +139,6 @@ const App: React.FC = () => {
   const classNames = useMemo(() => classes.map(c => c.name).sort(), [classes]);
 
   const handleLogin = (newRole: Role, user: any) => {
-    // FORCE PASSWORD CHANGE CHECK
-    // If student needs password change, direct them to change password modal immediately
     if (newRole === 'STUDENT') {
         // Find fresh student data from state to ensure we check the latest flag
         const freshStudentData = students.find(s => s.nis === user.nis);
@@ -156,17 +153,18 @@ const App: React.FC = () => {
     setRole(newRole);
     
     // Update Student Activity if Role is Student
-    if (newRole === 'STUDENT' && user.nis) {
-       // Simulate capturing IP and timestamp
+    if (newRole === 'STUDENT' && user.id) { // Supabase user should have ID
        const simulatedIP = `192.168.1.${Math.floor(Math.random() * 255)}`;
        const now = new Date().toISOString();
        
-       const updatedStudents = students.map(s => 
-         s.nis === user.nis 
-            ? { ...s, lastLogin: now, ipAddress: simulatedIP } 
-            : s
-       );
-       setStudents(updatedStudents);
+       // Fire-and-forget update to Supabase
+       supabase.from('students').update({
+           lastLogin: now,
+           ipAddress: simulatedIP
+       }).eq('id', user.id).then(({ error }) => {
+           if (error) console.error("Failed to update login activity", error);
+       });
+       
        setCurrentUser({ ...user, lastLogin: now, ipAddress: simulatedIP });
     } else {
         setCurrentUser(user);
@@ -182,43 +180,45 @@ const App: React.FC = () => {
     setActiveView('MODULES'); // Reset view on logout
   };
 
-  const handleChangePassword = (newPass: string) => {
-      if (!currentUser) return;
+  const handleChangePassword = async (newPass: string) => {
+      if (!currentUser || !currentUser.id) return;
       
-      const updatedStudents = students.map(s => 
-          s.nis === currentUser.nis 
-          ? { ...s, password: newPass, needsPasswordChange: false } 
-          : s
-      );
-      setStudents(updatedStudents);
+      const { error } = await supabase.from('students').update({
+          password: newPass,
+          needsPasswordChange: false
+      }).eq('id', currentUser.id);
+
+      if (error) {
+          alert("Gagal mengubah password: " + error.message);
+          return;
+      }
       
-      // Update Current User context
+      alert("Password berhasil diubah!");
       const updatedUser = { ...currentUser, password: newPass, needsPasswordChange: false };
       setCurrentUser(updatedUser);
-      
       setIsChangePassOpen(false);
-      
-      // Log them in fully now
       handleLogin('STUDENT', updatedUser);
   };
 
-  const handleUpload = (data: Partial<LearningModule>) => {
-    const newModule: LearningModule = {
-      id: Math.random().toString(36).substr(2, 9),
-      uploadDate: new Date().toISOString(),
-      tags: [],
-      title: data.title || 'Untitled',
-      description: data.description || '',
-      category: data.category as string,
-      fileUrl: data.fileUrl,
-      fileName: data.fileName,
-      aiSummary: data.aiSummary,
-      targetClasses: data.targetClasses, // Save selected classes
-      quiz: data.quiz,
-      ...data
-    } as LearningModule;
-    
-    setModules([newModule, ...modules]);
+  // --- CRUD HANDLERS (SUPABASE) ---
+
+  const handleUpload = async (data: Partial<LearningModule>) => {
+    try {
+        // Remove ID if present to let DB generate UUID
+        const { id, ...insertData } = data as any;
+        const { error } = await supabase.from('modules').insert({
+            ...insertData,
+            uploadDate: new Date().toISOString(),
+            tags: data.tags || [],
+            // Supabase handles JSONB for quiz automatically if passed as object
+            quiz: data.quiz || null
+        });
+
+        if (error) throw error;
+    } catch (e: any) {
+        console.error("Error upload:", e);
+        alert("Gagal mengunggah ke database: " + e.message);
+    }
   };
 
   // Function to open upload modal with a specific target class
@@ -227,97 +227,163 @@ const App: React.FC = () => {
       setIsUploadOpen(true);
   };
 
-  const handleUpdateModule = (updatedModule: LearningModule) => {
-    setModules(modules.map(m => m.id === updatedModule.id ? updatedModule : m));
+  const handleUpdateModule = async (updatedModule: LearningModule) => {
+    try {
+        const { id, ...updateData } = updatedModule;
+        // Make sure quiz is passed as JSON object
+        const { error } = await supabase.from('modules').update(updateData).eq('id', id);
+        if (error) throw error;
+    } catch (e) {
+        console.error("Error update module:", e);
+    }
   };
 
-  // Replaced window.confirm with Custom Modal Trigger
   const handleDeleteModule = (id: string) => {
     setDeleteConfirmation({ isOpen: true, type: 'MODULE', id });
   };
 
-  const handleAddStudent = (student: Student) => {
-    setStudents([...students, student]);
+  const handleAddStudent = async (student: Student) => {
+    try {
+        // Remove ID to let DB generate UUID
+        const { id, ...insertData } = student as any; 
+        const { error } = await supabase.from('students').insert(insertData);
+        if (error) {
+            alert("Gagal menambah siswa: " + error.message);
+        }
+    } catch (e) {
+        console.error("Error add student:", e);
+    }
   };
   
-  const handleImportStudents = (newStudents: Student[]) => {
-      // Merge unique students based on NIS
-      const existingNis = new Set(students.map(s => s.nis));
-      const filteredNew = newStudents.filter(s => !existingNis.has(s.nis));
-      setStudents([...students, ...filteredNew]);
+  const handleImportStudents = async (newStudents: Student[]) => {
+      // Bulk insert
+      const studentsToInsert = newStudents.map(s => {
+          // Check for existing NIS locally to avoid unique constraint error before sending
+          // (Though Supabase will throw error anyway)
+          return {
+              nis: s.nis,
+              name: s.name,
+              classes: s.classes,
+              password: s.password,
+              needsPasswordChange: true
+          };
+      });
+
+      const { error } = await supabase.from('students').insert(studentsToInsert);
+      if (error) {
+          console.error(error);
+          alert("Gagal import siswa (mungkin ada NIS duplikat): " + error.message);
+      } else {
+          alert("Berhasil import siswa!");
+      }
   };
 
-  const handleUpdateStudent = (updatedStudent: Student) => {
-    setStudents(students.map(s => s.nis === updatedStudent.nis ? updatedStudent : s));
+  const handleUpdateStudent = async (updatedStudent: Student) => {
+      // We need ID for update. The student object from Supabase Fetch should have ID.
+      // If we are editing a student, ensure 'id' is present in the object.
+      const sId = (updatedStudent as any).id;
+      if (!sId) {
+          // Fallback: update by NIS (Assuming NIS is unique)
+          const { error } = await supabase.from('students')
+            .update({
+                name: updatedStudent.name,
+                classes: updatedStudent.classes,
+                password: updatedStudent.password
+            })
+            .eq('nis', updatedStudent.nis);
+          if (error) console.error(error);
+          return;
+      }
+
+      const { id, ...data } = updatedStudent as any;
+      await supabase.from('students').update(data).eq('id', sId);
   };
 
-  // Replaced window.confirm with Custom Modal Trigger
   const handleDeleteStudent = (nis: string) => {
-    setDeleteConfirmation({ isOpen: true, type: 'STUDENT', id: nis, details: `NIS: ${nis}` });
+    // Find ID from NIS
+    const student = students.find(s => s.nis === nis);
+    if (student) {
+        setDeleteConfirmation({ isOpen: true, type: 'STUDENT', id: (student as any).id, details: `NIS: ${nis}` });
+    }
   };
 
-  const handleUpdateClasses = (updatedClasses: ClassGroup[]) => {
-    setClasses(updatedClasses);
+  const handleUpdateClasses = async (updatedClasses: ClassGroup[]) => {
+     // Identify New Classes
+     const newClasses = updatedClasses.filter(nc => !classes.find(oc => oc.id === nc.id));
+     if (newClasses.length > 0) {
+        const cleanNewClasses = newClasses.map(c => ({
+            name: c.name,
+            description: c.description
+        }));
+        await supabase.from('classes').insert(cleanNewClasses);
+     }
+     
+     // Identify Deleted Classes
+     // Note: Logic here depends on how updatedClasses is constructed.
+     // Since this function receives the "New State" array, we compare IDs.
+     // Existing IDs not in updatedClasses => Delete.
+     const idsToKeep = updatedClasses.map(c => c.id);
+     const idsToDelete = classes.filter(c => !idsToKeep.includes(c.id)).map(c => c.id);
+     
+     if (idsToDelete.length > 0) {
+         await supabase.from('classes').delete().in('id', idsToDelete);
+     }
   };
 
   // Actual Delete Logic
-  const executeDelete = () => {
+  const executeDelete = async () => {
       if (deleteConfirmation.type === 'MODULE') {
-          setModules(modules.filter(m => m.id !== deleteConfirmation.id));
+          await supabase.from('modules').delete().eq('id', deleteConfirmation.id);
       } else if (deleteConfirmation.type === 'STUDENT') {
-          setStudents(students.filter(s => s.nis !== deleteConfirmation.id));
+          await supabase.from('students').delete().eq('id', deleteConfirmation.id);
       }
       setDeleteConfirmation({ ...deleteConfirmation, isOpen: false });
   };
 
-  // Callback when a student finishes a quiz
-  const handleQuizSubmit = (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations = 0, isDisqualified = false) => {
+  const handleQuizSubmit = async (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations = 0, isDisqualified = false) => {
     if (!currentUser) return;
 
-    // Check if result already exists for this module attempt (simple logic, assume overwrite or new attempt)
-    // For simplicity, we just add new result to history
-    const newResult: QuizResult = {
-        id: Date.now().toString(),
+    const newResult = {
         studentName: currentUser.name,
         studentNis: currentUser.nis,
         moduleTitle: modules.find(m => m.id === moduleId)?.title || 'Unknown Module',
         quizTitle: quizTitle,
         score: score,
         submittedAt: new Date().toISOString(),
-        answers: detailedAnswers,
+        answers: detailedAnswers, // Supabase converts array to JSONB
         violations: violations,
         isDisqualified: isDisqualified
     };
 
-    setQuizResults([newResult, ...quizResults]);
+    const { error } = await supabase.from('results').insert(newResult);
+    if (error) console.error("Error submitting quiz", error);
   };
 
-  // Reset Exam Violation (Deletes the attempt so they can retake)
-  const handleResetExam = (resultId: string) => {
-      setQuizResults(prev => prev.filter(r => r.id !== resultId));
+  const handleResetExam = async (resultId: string) => {
+      await supabase.from('results').delete().eq('id', resultId);
   };
 
-  // Callback to update quiz results (after grading)
-  const handleUpdateQuizResult = (updatedResult: QuizResult) => {
-     setQuizResults(prev => prev.map(r => r.id === updatedResult.id ? updatedResult : r));
+  const handleUpdateQuizResult = async (updatedResult: QuizResult) => {
+     const { id, ...data } = updatedResult;
+     await supabase.from('results').update(data).eq('id', id);
   };
 
-  const handleAddManualGrade = (grade: ManualGrade) => {
-    setManualGrades(prev => [grade, ...prev]);
+  const handleAddManualGrade = async (grade: ManualGrade) => {
+      const { id, ...data } = grade as any;
+      await supabase.from('grades').insert(data);
   };
 
-  const handleUpdateManualGrade = (updatedGrade: ManualGrade) => {
-    setManualGrades(prev => prev.map(g => g.id === updatedGrade.id ? updatedGrade : g));
+  const handleUpdateManualGrade = async (updatedGrade: ManualGrade) => {
+    const { id, ...data } = updatedGrade;
+    await supabase.from('grades').update(data).eq('id', id);
   };
 
-  const handleDeleteManualGrade = (id: string) => {
-    setManualGrades(currentGrades => currentGrades.filter(g => g.id !== id));
+  const handleDeleteManualGrade = async (id: string) => {
+    await supabase.from('grades').delete().eq('id', id);
   };
 
-  // Helper to find student's result for a module
   const getStudentResult = (moduleTitle: string) => {
     if (!currentUser) return null;
-    // Find the latest submission for this module by this student
     return quizResults
         .filter(r => r.moduleTitle === moduleTitle && r.studentNis === currentUser.nis)
         .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())[0];
@@ -325,29 +391,20 @@ const App: React.FC = () => {
 
   const filteredModules = useMemo(() => {
     return modules.filter(m => {
-      // 1. Basic Search & Category Filter
       const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
                             m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
       const matchesCategory = selectedCategory === 'All' || m.category === selectedCategory;
-      
-      // 2. Exam View Filter
       const isExamViewFilter = activeView === 'EXAMS' ? (m.quiz !== undefined && m.quiz.questions.length > 0) : true;
 
-      // 3. Class/Enrollment Filter (Access Control)
       let hasAccess = true;
       if (role === 'ADMIN') {
-        hasAccess = true; // Admin sees all
+        hasAccess = true;
       } else if (role === 'GUEST') {
-        // Guest only sees public modules (targetClasses is undefined or empty)
         hasAccess = !m.targetClasses || m.targetClasses.length === 0;
       } else if (role === 'STUDENT' && currentUser) {
-        // Student sees public modules OR modules assigned to ANY of their classes
         const isPublic = !m.targetClasses || m.targetClasses.length === 0;
-        
-        // CHECK: Is any of student's classes in the module's targetClasses?
         const studentClasses = currentUser.classes || [];
         const isAssignedToClass = studentClasses.some((c: string) => m.targetClasses?.includes(c));
-        
         hasAccess = isPublic || !!isAssignedToClass;
       }
 
@@ -355,7 +412,6 @@ const App: React.FC = () => {
     });
   }, [modules, searchQuery, selectedCategory, activeView, role, currentUser]);
 
-  // Helper text for profile
   const getProfileClassText = () => {
       if (role !== 'STUDENT') return 'Administrator';
       if (!currentUser?.classes || currentUser.classes.length === 0) return 'Siswa (Belum Ada Kelas)';
@@ -363,6 +419,15 @@ const App: React.FC = () => {
         ? `${currentUser.classes.length} Kelas Terdaftar`
         : `Kelas ${currentUser.classes[0]}`;
   };
+
+  if (isLoadingData) {
+      return (
+          <div className="min-h-screen flex items-center justify-center bg-slate-50 flex-col gap-4">
+              <Loader2 className="animate-spin text-indigo-600" size={48} />
+              <p className="text-slate-500 font-medium">Menghubungkan ke Supabase (Database)...</p>
+          </div>
+      );
+  }
 
   return (
     <div className="min-h-screen flex flex-col font-sans text-slate-800 bg-slate-50/50">
@@ -473,6 +538,10 @@ const App: React.FC = () => {
                                         <p className="text-xs text-slate-500 truncate mt-0.5">
                                           {getProfileClassText()}
                                         </p>
+                                        {/* Database Indicator */}
+                                        <div className="mt-2 flex items-center gap-1.5 text-[10px] text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 w-fit">
+                                            <Database size={10} /> Supabase Online
+                                        </div>
                                      </div>
                                      
                                      <div className="p-1">
@@ -523,7 +592,6 @@ const App: React.FC = () => {
 
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* ... (Header content omitted for brevity, logic handled) ... */}
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
           <div>
@@ -562,7 +630,6 @@ const App: React.FC = () => {
           )}
         </div>
 
-        {/* ... (Stats and Search sections remain the same) ... */}
         {/* ADMIN STATS - Only on Modules View */}
         {role === 'ADMIN' && activeView === 'MODULES' && (
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
