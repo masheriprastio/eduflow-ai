@@ -7,6 +7,7 @@ import StudentManager from './components/StudentManager';
 import QuizManager from './components/QuizManager';
 import ReportsDashboard from './components/ReportsDashboard';
 import ChangePasswordModal from './components/ChangePasswordModal';
+import SettingsModal from './components/SettingsModal';
 import { 
   GraduationCap, 
   PlusCircle, 
@@ -26,7 +27,8 @@ import {
   Trash2,
   Database,
   Loader2,
-  WifiOff
+  WifiOff,
+  Settings
 } from 'lucide-react';
 
 // --- SUPABASE IMPORTS ---
@@ -119,6 +121,7 @@ const App: React.FC = () => {
   const [isQuizManagerOpen, setIsQuizManagerOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
   const [isChangePassOpen, setIsChangePassOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   // Dropdown Menu State
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -479,6 +482,15 @@ const App: React.FC = () => {
 
             {/* Auth State & Actions */}
             <div className="flex items-center gap-4">
+              {/* Settings Button (Always Visible) */}
+              <button 
+                onClick={() => setIsSettingsOpen(true)}
+                className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+                title="Pengaturan API"
+              >
+                 <Settings size={20} />
+              </button>
+
               {role === 'GUEST' ? (
                  <button 
                     onClick={() => setIsLoginOpen(true)}
@@ -888,6 +900,11 @@ const App: React.FC = () => {
             handleLogout();
         }}
         onChangePassword={handleChangePassword}
+      />
+
+      <SettingsModal 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)}
       />
 
     </div>

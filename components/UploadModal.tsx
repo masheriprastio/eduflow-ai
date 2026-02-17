@@ -209,7 +209,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
             {/* Description & AI */}
             <div className="relative">
               <div className="flex justify-between items-center mb-2">
-                 <label className="block text-sm font-semibold text-slate-700">Deskripsi Singkat</label>
+                 <label className="block text-sm font-semibold text-slate-700">Deskripsi / Ringkasan Materi</label>
                  <button 
                    type="button"
                    onClick={handleAutoGenerate}
@@ -230,9 +230,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 rows={3}
-                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all"
-                placeholder="Jelaskan isi materi secara singkat..."
+                className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none transition-all placeholder:text-slate-400"
+                placeholder="PENTING: Tulis atau paste ringkasan materi di sini agar AI bisa membuat soal yang akurat..."
               />
+              <p className="text-[10px] text-slate-400 mt-1">*AI akan menggunakan teks ini sebagai sumber soal kuis.</p>
               
               {aiData && (
                  <div className="mt-3 bg-indigo-50 rounded-lg p-4 border border-indigo-100 animate-in slide-in-from-top-2">
@@ -256,8 +257,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                     <FileText size={16}/>
                     Info Penting:
                 </div>
-                <p>1. Pembuatan soal kuis dapat dilakukan di menu "Kelola Kuis" setelah diunggah.</p>
-                <p>2. File akan disimpan di database agar bisa diakses siswa dari perangkat lain.</p>
+                <p>1. <strong>Isi Deskripsi dengan Lengkap:</strong> AI membuat soal berdasarkan teks yang Anda tulis di kolom Deskripsi, bukan dari file PDF (saat ini).</p>
+                <p>2. File PDF/Doc hanya disimpan untuk diunduh oleh siswa.</p>
             </div>
 
           </form>
