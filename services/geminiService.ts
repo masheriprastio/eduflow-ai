@@ -140,31 +140,32 @@ export const generateQuizQuestions = async (
     
     if (type === 'MULTIPLE_CHOICE') {
       formatInstruction = `
-        Format JSON (Array of Objects):
+        Format Output HARUS JSON Array murni:
         [
           {
             "id": "generate_unique_id_here",
             "type": "MULTIPLE_CHOICE",
-            "question": "Pertanyaan yang jelas dan spesifik?",
-            "options": ["Jawaban Benar", "Pengecoh Masuk Akal 1", "Pengecoh Masuk Akal 2", "Pengecoh Masuk Akal 3"],
-            "correctAnswer": "Jawaban Benar"
+            "question": "Pertanyaan...",
+            "options": ["Opsi A", "Opsi B", "Opsi C", "Opsi D"],
+            "correctAnswer": "Opsi A"
           }
         ]
-        ATURAN OPSI JAWABAN:
-        1. "options" HARUS berisi 4 string.
-        2. Opsi jawaban harus HOMOGEN (sejenis) dan panjang kalimatnya seimbang.
-        3. Pengecoh (distractor) HARUS relevan dengan topik "${title}", jangan gunakan jawaban yang konyol atau jelas salah bagi orang awam.
-        4. Jangan gunakan "Semua Benar" atau "Semua Salah" kecuali sangat diperlukan.
+        
+        ATURAN KHUSUS PILIHAN GANDA:
+        1. "options" HARUS berisi 4 pilihan jawaban.
+        2. Opsi jawaban harus HOMOGEN (setara panjang dan jenis kalimatnya).
+        3. Pengecoh (jawaban salah) harus TERLIHAT MASUK AKAL bagi yang tidak paham materi, tapi JELAS SALAH bagi yang paham. JANGAN buat pengecoh konyol atau asal-asalan.
+        4. "correctAnswer" harus sama persis string-nya dengan salah satu di "options".
       `;
     } else {
       formatInstruction = `
-        Format JSON (Array of Objects):
+        Format Output HARUS JSON Array murni:
         [
           {
             "id": "generate_unique_id_here",
             "type": "ESSAY",
-            "question": "Pertanyaan?",
-            "correctAnswer": "Rubrik penilaian/poin kunci jawaban."
+            "question": "Pertanyaan...",
+            "correctAnswer": "Poin-poin kunci jawaban yang diharapkan..."
           }
         ]
       `;
@@ -174,41 +175,42 @@ export const generateQuizQuestions = async (
     let difficultyPrompt = "";
     if (difficulty === 'HOTS') {
         difficultyPrompt = `
-        LEVEL: SULIT / HOTS (Higher Order Thinking Skills).
-        - Soal harus berbasis ANALISIS kasus, EVALUASI data, atau MENYIMPULKAN.
-        - Hindari pertanyaan "Apa itu..." atau "Sebutkan...".
-        - Berikan konteks/skenario sebelum pertanyaan jika memungkinkan.
+        Tingkat Kesulitan: HOTS (High Order Thinking Skills).
+        - Soal harus menuntut ANALISIS, EVALUASI, atau KREASI.
+        - Hindari pertanyaan "Apa yang dimaksud dengan..." atau hapalan sederhana.
+        - Gunakan studi kasus singkat atau skenario jika memungkinkan.
         `;
     } else if (difficulty === 'BASIC') {
         difficultyPrompt = `
-        LEVEL: MUDAH / BASIC.
-        - Fokus pada ingatan (recall) definisi, istilah, atau fakta dasar dari materi.
-        - Bahasa langsung dan mudah dipahami.
+        Tingkat Kesulitan: DASAR (Basic Knowledge).
+        - Fokus pada pemahaman konsep, definisi, dan fakta penting dari materi.
+        - Bahasa lugas dan langsung.
         `;
     } else {
         // MIX
         difficultyPrompt = `
-        LEVEL: CAMPURAN (Mixed).
-        - Buat variasi antara soal definisi dasar dan soal analisis.
+        Tingkat Kesulitan: CAMPURAN.
+        - Kombinasikan soal pemahaman dasar dan analisis.
         `;
     }
 
     const promptText = `
-      Bertindaklah sebagai Guru Ahli Pembuat Soal Ujian.
+      Anda adalah Guru Profesional yang ahli membuat instrumen evaluasi pembelajaran yang valid dan reliabel.
       
       TOPIK UTAMA: "${title}"
       
-      KONTEKS TAMBAHAN:
+      SUMBER REFERENSI:
       "${contentContext}"
+      (Analisis dengan teliti teks di atas DAN file dokumen yang dilampirkan jika ada).
 
-      INSTRUKSI:
-      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan DOKUMEN YANG DILAMPIRKAN (Jika ada) dan konteks di atas.
+      TUGAS:
+      Buatkan ${count} butir soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan materi tersebut.
+
+      KRITERIA KUALITAS:
+      1. **Relevansi Ketat**: Soal harus 100% berdasarkan materi yang diberikan/dilampirkan. Jangan membuat soal di luar konteks dokumen.
+      2. **Bahasa Natural**: Gunakan Bahasa Indonesia yang baku namun luwes (natural), seperti soal ujian sekolah standar nasional. Hindari bahasa terjemahan kaku.
+      3. **Konstruksi Soal**: Pokok soal (stem) harus jelas dan tidak bermakna ganda.
       
-      PENTING:
-      1. Utamakan informasi dari dokumen yang dilampirkan.
-      2. Jika dokumen tidak terbaca, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}".
-      3. Bahasa Indonesia formal dan akademis.
-
       ${difficultyPrompt}
 
       ${formatInstruction}
@@ -237,7 +239,7 @@ export const generateQuizQuestions = async (
       contents: { role: 'user', parts: parts }, // Correct structure for mixed content
       config: {
         responseMimeType: "application/json",
-        temperature: 0.4, 
+        temperature: 0.3, // Lower temperature for stricter adherence to context
       }
     });
 
