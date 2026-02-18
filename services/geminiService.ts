@@ -38,11 +38,12 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
   // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin - Cache In-Memory)
   let apiKey = dbApiKey || '';
 
-  // 2. Jika Cache kosong, coba fetch langsung dari Supabase (System Settings)
-  // Ini penting agar Siswa (yang tidak punya localStorage key) bisa dapat key dari Admin
+  // 2. Jika Cache kosong, coba fetch langsung dari Supabase
+  // STRATEGY: Try 'system_settings' first (Clean way), then fallback to 'modules' (Hacky way)
   if (!apiKey) {
       try {
-          const { data } = await supabase
+          // A. Try standard system_settings
+          let { data, error } = await supabase
             .from('system_settings')
             .select('value')
             .eq('key', 'gemini_api_key')
@@ -50,11 +51,27 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
           
           if (data && data.value) {
               apiKey = data.value;
-              setGlobalApiKey(apiKey); // Update cache global
-              console.log("API Key fetched lazily from DB");
+          } else {
+             // B. Fallback: Try 'modules' table (ID: config_api_key)
+             // This avoids the 'table not found' error by using a table we know exists
+             const modResult = await supabase
+                .from('modules')
+                .select('description')
+                .eq('id', 'config_api_key')
+                .single();
+             
+             if (modResult.data && modResult.data.description) {
+                 apiKey = modResult.data.description;
+             }
           }
+
+          if (apiKey) {
+              setGlobalApiKey(apiKey);
+              console.log("Global API Key fetched successfully.");
+          }
+
       } catch (err) {
-          // Silent fail, will try next method
+          // Silent fail
       }
   }
 

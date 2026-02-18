@@ -75,17 +75,17 @@ const App: React.FC = () => {
               }
           };
 
-          // Helper to fetch system settings (API Key)
+          // Helper to fetch system settings (API Key) - NOW USING MODULES TABLE FALLBACK
           const fetchSettings = async () => {
               if (!isSupabaseConfigured()) return;
               try {
-                  // Attempt to fetch API Key from 'system_settings' table
-                  const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'gemini_api_key').single();
-                  if (data && data.value) {
-                      console.log("Global API Key loaded from database.");
-                      setGlobalApiKey(data.value);
+                  // Attempt to fetch API Key from 'modules' table using specific ID
+                  // We reuse the 'modules' table because 'system_settings' might not exist
+                  const { data, error } = await supabase.from('modules').select('description').eq('id', 'config_api_key').single();
+                  if (data && data.description) {
+                      console.log("Global API Key loaded from database (Module Storage).");
+                      setGlobalApiKey(data.description);
                   } else if (error) {
-                      // Table might not exist, harmless in demo
                       console.debug("System settings not found or error:", error.message);
                   }
               } catch (e) {
@@ -388,13 +388,7 @@ const App: React.FC = () => {
   };
 
   const handleUpdateClasses = (newClasses: ClassGroup[]) => {
-     // For simplicity in this demo, we just update local state. 
-     // A robust app would sync individual additions/deletions.
      setClasses(newClasses);
-     // If we were syncing, we'd need to loop and upsert/delete in Supabase.
-     // For now, rely on `StudentManager` effectively managing the list for UI, 
-     // and if online, `StudentManager` logic would need extension to properly sync DB.
-     // (The current StudentManager logic relies on parent state update)
   };
 
   // --- QUIZ & RESULTS HANDLERS ---
@@ -426,9 +420,6 @@ const App: React.FC = () => {
         }
         
         setQuizResults(prev => [resultData, ...prev]);
-        
-        // Show local feedback
-        // (ModuleCard already shows the result screen)
     } catch (e) {
         console.error("Submit quiz error", e);
         // Save locally fallback
@@ -514,14 +505,14 @@ const App: React.FC = () => {
 
   const filteredModules = useMemo(() => {
     return modules.filter(m => {
+        // EXCLUDE SYSTEM CONFIG MODULE
+        if (m.id === 'config_api_key') return false;
+
         const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) 
                             || m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
         const matchesCategory = selectedCategory === 'All' || m.category === selectedCategory;
         
         // Student Access Control: 
-        // If student has classes assigned, they should only see:
-        // 1. Modules with NO targetClasses (Public)
-        // 2. Modules where targetClasses includes one of student's classes
         if (role === 'STUDENT' && currentUser) {
              const studentClasses = currentUser.classes || [];
              const isPublic = !m.targetClasses || m.targetClasses.length === 0;

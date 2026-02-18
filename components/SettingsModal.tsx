@@ -19,13 +19,33 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             setApiKey(stored);
         } else if (isSupabaseConfigured()) {
             // 2. Jika lokal kosong, coba ambil dari Database (Sinkronisasi Global)
-            supabase.from('system_settings')
-                .select('value')
-                .eq('key', 'gemini_api_key')
-                .single()
-                .then(({ data }) => {
-                    if (data && data.value) setApiKey(data.value);
-                });
+            // STRATEGY: Check 'system_settings' first, then 'modules' fallback
+            const fetchFromDB = async () => {
+                let foundKey = '';
+                
+                // Try clean table
+                const { data: cleanData } = await supabase
+                    .from('system_settings')
+                    .select('value')
+                    .eq('key', 'gemini_api_key')
+                    .single();
+                
+                if (cleanData && cleanData.value) foundKey = cleanData.value;
+                
+                // Try fallback table if not found
+                if (!foundKey) {
+                     const { data: modData } = await supabase
+                        .from('modules')
+                        .select('description')
+                        .eq('id', 'config_api_key')
+                        .single();
+                     if (modData && modData.description) foundKey = modData.description;
+                }
+
+                if (foundKey) setApiKey(foundKey);
+            };
+            
+            fetchFromDB();
         }
     }
   }, [isOpen]);
@@ -44,8 +64,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
     if (isSupabaseConfigured()) {
         try {
-            // Upsert: Insert atau Update jika key 'gemini_api_key' sudah ada
-            // Pastikan tabel 'system_settings' memiliki kolom: key (text, PK), value (text)
+            // STRATEGY: Try to save to 'system_settings'. 
+            // If it fails (likely due to missing table), fallback to saving as a hidden 'module'.
+            
             const { error } = await supabase
                 .from('system_settings')
                 .upsert({ key: 'gemini_api_key', value: trimmedKey }, { onConflict: 'key' });
@@ -53,8 +74,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             if (!error) {
                 dbSuccess = true;
             } else {
-                dbErrorMsg = error.message;
-                console.warn("Gagal simpan ke DB:", error);
+                console.warn("Table 'system_settings' missing. Falling back to 'modules' table storage.", error.message);
+                
+                // FALLBACK: Store in 'modules' table with a specific ID
+                const { error: fallbackError } = await supabase
+                    .from('modules')
+                    .upsert({
+                        id: 'config_api_key',
+                        title: 'SYSTEM_CONFIG_DO_NOT_DELETE',
+                        description: trimmedKey,
+                        category: 'System',
+                        uploadDate: new Date().toISOString(),
+                        tags: ['system', 'hidden']
+                    });
+                
+                if (!fallbackError) {
+                    dbSuccess = true;
+                } else {
+                    dbErrorMsg = fallbackError.message;
+                }
             }
         } catch (e: any) {
             dbErrorMsg = e.message || 'Connection Error';
@@ -65,14 +103,14 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
 
     if (dbSuccess) {
         alert("BERHASIL! API Key tersimpan di Database Pusat.\n\nSemua siswa sekarang dapat menggunakan fitur Tutor AI tanpa perlu memasukkan key manual.");
+        window.location.reload(); 
     } else {
         const msg = isSupabaseConfigured() 
-            ? `Peringatan: Gagal menyimpan ke Database (${dbErrorMsg}).\nKemungkinan tabel 'system_settings' belum dibuat di Supabase.\nKey hanya tersimpan di browser ini sementara.`
+            ? `Gagal menyimpan ke Database (${dbErrorMsg}).\nKey tersimpan di browser ini saja.`
             : "Mode Offline: API Key disimpan di browser ini saja (Local Storage).";
         alert(msg);
+        window.location.reload();
     }
-    
-    window.location.reload(); // Refresh agar App.tsx mengambil ulang key baru
   };
 
   const handleClear = async () => {
@@ -81,7 +119,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         localStorage.removeItem('USER_API_KEY');
         
         if (isSupabaseConfigured()) {
+            // Delete from both potential locations
             await supabase.from('system_settings').delete().eq('key', 'gemini_api_key');
+            await supabase.from('modules').delete().eq('id', 'config_api_key');
         }
 
         setApiKey('');
