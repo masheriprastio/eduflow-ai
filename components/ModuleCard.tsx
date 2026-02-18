@@ -1,37 +1,32 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { LearningModule, Role, Question, StudentAnswer } from '../types';
+import { LearningModule, Role, StudentAnswer } from '../types';
 import { askAboutModule } from '../services/geminiService';
 import { 
-  BookOpen, 
-  Download, 
-  Sparkles, 
-  MessageCircle, 
-  Send,
-  Trash2,
+  FileText, 
+  Play, 
+  Clock, 
+  CheckCircle, 
+  AlertTriangle, 
+  HelpCircle, 
+  Trash2, 
+  Download,
+  Lock, 
+  Unlock,
+  ChevronDown,
+  ChevronUp,
   BrainCircuit,
+  MessageSquare,
   X,
-  CheckCircle,
-  XCircle,
-  Trophy,
-  RotateCcw,
-  ChevronRight,
-  ChevronLeft,
-  Pencil,
-  ImageIcon,
-  Users,
-  Timer,
-  AlertTriangle,
-  Maximize2,
-  Lock,
-  Ban,
-  GraduationCap,
+  Send,
+  Loader2,
+  Edit,
+  AlertCircle,
   CalendarClock,
-  Clock,
-  List,
-  Bot,
-  User,
-  Archive
+  Timer,
+  Archive,
+  Globe,
+  Ban
 } from 'lucide-react';
 
 interface ModuleCardProps {
@@ -39,91 +34,69 @@ interface ModuleCardProps {
   role: Role;
   onDelete?: (id: string) => void;
   onEdit?: (module: LearningModule) => void;
-  onQuizSubmit?: (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations?: number, isDisqualified?: boolean) => void;
-}
-
-interface ChatMessage {
-    id: string;
-    role: 'user' | 'ai';
-    text: string;
+  onQuizSubmit?: (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations: number, isDisqualified: boolean) => void;
 }
 
 const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit, onQuizSubmit }) => {
-  const [showAIHelp, setShowAIHelp] = useState(false);
-  const [question, setQuestion] = useState('');
-  const [isLoading, setIsLoading] = useState(false);
+  // UI State
+  const [isExpanded, setIsExpanded] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   
   // Chat State
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  const [chatInput, setChatInput] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'ai', text: string}[]>([]);
+  const [isChatLoading, setIsChatLoading] = useState(false);
 
   // Quiz State
-  const [isQuizOpen, setIsQuizOpen] = useState(false);
-  const [quizAnswers, setQuizAnswers] = useState<Record<string, string>>({});
-  const [quizStatus, setQuizStatus] = useState<'IDLE' | 'RUNNING' | 'COMPLETED' | 'DISQUALIFIED'>('IDLE');
+  const [quizStatus, setQuizStatus] = useState<'IDLE' | 'IN_PROGRESS' | 'COMPLETED' | 'DISQUALIFIED'>('IDLE');
+  const [quizAnswers, setQuizAnswers] = useState<{[key: string]: string}>({});
   const [score, setScore] = useState(0);
-  
-  // New: Shuffled questions for the current session
-  const [shuffledQuestions, setShuffledQuestions] = useState<Question[]>([]);
-  // New: Current Question Index for Pagination
-  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
-
-  // --- EXAM & ANTI-CHEAT STATE ---
-  const [timeLeft, setTimeLeft] = useState(0); // in seconds
+  const [timeLeft, setTimeLeft] = useState(0);
   const [violations, setViolations] = useState(0);
-  const MAX_VIOLATIONS = 3;
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const [violationMsg, setViolationMsg] = useState<string | null>(null);
 
-  // Auto-scroll chat
+  const timerRef = useRef<number | null>(null);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Scroll chat to bottom
   useEffect(() => {
-      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [chatHistory, showAIHelp, isLoading]);
-
-  const handleAskAI = async () => {
-    if (!question.trim()) return;
-    if (role === 'GUEST') {
-        alert("Silakan Login terlebih dahulu untuk bertanya pada Tutor AI.");
-        return;
+    if (isChatOpen) {
+        chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
-    
-    const currentQ = question;
-    setQuestion(''); // Clear input immediately
-    
-    // Add User Message
-    const userMsg: ChatMessage = { 
-        id: Date.now().toString(), 
-        role: 'user', 
-        text: currentQ 
-    };
-    setChatHistory(prev => [...prev, userMsg]);
-    setIsLoading(true);
+  }, [chatHistory, isChatOpen]);
 
-    try {
-        const response = await askAboutModule(module.title, module.description + (module.aiSummary || ''), currentQ);
-        const aiMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
-            role: 'ai',
-            text: response || 'Maaf, saya tidak dapat merespons saat ini.'
+  // Clean up timer on unmount
+  useEffect(() => {
+      return () => {
+          if (timerRef.current) clearInterval(timerRef.current);
+      };
+  }, []);
+
+  // Handle Fullscreen & Violation logic for EXAM
+  useEffect(() => {
+    if (quizStatus === 'IN_PROGRESS') {
+        const handleVisibilityChange = () => {
+            if (document.hidden && module.quiz?.quizType === 'EXAM') {
+                setViolations(v => {
+                    const newV = v + 1;
+                    if (newV >= 3) {
+                        handleSubmitQuiz(true, true); // Auto submit disqualified
+                        alert("ANDA DIDISKUALIFIKASI! Terdeteksi meninggalkan halaman ujian lebih dari 3 kali.");
+                    } else {
+                        alert(`PERINGATAN PELANGGARAN! (${newV}/3)\nAnda meninggalkan halaman ujian. Jangan membuka tab lain!`);
+                    }
+                    return newV;
+                });
+            }
         };
-        setChatHistory(prev => [...prev, aiMsg]);
-    } catch (error) {
-        const errorMsg: ChatMessage = {
-            id: (Date.now() + 1).toString(),
-            role: 'ai',
-            text: 'Terjadi kesalahan koneksi. Silakan coba lagi.'
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
         };
-        setChatHistory(prev => [...prev, errorMsg]);
-    } finally {
-        setIsLoading(false);
     }
-  };
+  }, [quizStatus, module.quiz?.quizType]);
 
-  const resetChat = () => {
-      setChatHistory([]);
-  };
-
-  // Check Schedule Validity
+  // Helper: Check Schedule Validity
   const checkSchedule = (): { status: 'OPEN' | 'NOT_STARTED' | 'EXPIRED'; message?: string } => {
       if (!module.quiz?.startDate && !module.quiz?.endDate) return { status: 'OPEN' };
       
@@ -139,85 +112,53 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
       return { status: 'OPEN' };
   };
 
-  const isPublished = module.quiz?.isPublished ?? false;
-
-  const openQuizModal = () => {
-      if (role === 'GUEST') {
-          alert("Akses Ditolak: Anda harus Login sebagai Siswa untuk mengerjakan kuis/ujian.");
-          return;
-      }
-      if (role === 'STUDENT' && !isPublished) {
-          alert("Ujian ini belum dipublikasikan oleh guru.");
-          return;
-      }
-      const schedule = checkSchedule();
-      if (role === 'STUDENT' && schedule.status !== 'OPEN') {
-          alert(schedule.message);
-          return;
-      }
-      setIsQuizOpen(true);
-  };
-
-  const handleDownload = (e: React.MouseEvent) => {
-      if (role === 'GUEST') {
-          e.preventDefault();
-          alert("Akses Ditolak: Anda harus Login untuk mengunduh materi.");
-          return;
-      }
-      if (!module.fileUrl) {
-          e.preventDefault();
-      }
-  };
-
-  // --- QUIZ LOGIC ---
-  
-  const startExam = () => {
+  const handleStartQuiz = () => {
       if (!module.quiz) return;
       
+      // Access Control Checks
       if (role === 'GUEST') {
-          alert("Silakan Login terlebih dahulu.");
-          setIsQuizOpen(false);
+          alert("Silakan Login terlebih dahulu untuk mengerjakan kuis.");
           return;
       }
 
-      // Double check schedule before starting
+      const isPublished = module.quiz.isPublished ?? false;
+      if (role === 'STUDENT' && !isPublished) {
+          alert("Ujian ini masih dalam draft dan belum dipublikasikan oleh guru.");
+          return;
+      }
+
       const schedule = checkSchedule();
       if (role === 'STUDENT' && schedule.status !== 'OPEN') {
           alert(schedule.message);
-          setIsQuizOpen(false);
           return;
       }
-      
-      // Request Fullscreen
-      const elem = document.documentElement;
-      if (elem.requestFullscreen) {
-          elem.requestFullscreen().catch((err) => console.log("Fullscreen blocked", err));
-      }
 
-      // Initialize Timer (if duration exists)
-      const durationMin = module.quiz.duration || 0;
-      if (durationMin > 0) {
-          setTimeLeft(durationMin * 60);
-      } else {
-          setTimeLeft(-1); // Infinite
-      }
-
-      // SHUFFLE QUESTIONS (Randomization)
-      const shuffled = [...module.quiz.questions].sort(() => Math.random() - 0.5);
-      setShuffledQuestions(shuffled);
-
-      setQuizStatus('RUNNING');
-      setCurrentQuestionIndex(0); // Start at first question
+      // Init state
+      setQuizStatus('IN_PROGRESS');
+      setScore(0);
       setViolations(0);
       setQuizAnswers({});
-  };
 
-  const handleOptionSelect = (questionId: string, option: string) => {
-    if (quizStatus !== 'RUNNING') return;
-    setQuizAnswers(prev => ({
-        ...prev,
-        [questionId]: option
-    }));
+      // Set timer if exists
+      if (module.quiz.duration && module.quiz.duration > 0) {
+          setTimeLeft(module.quiz.duration * 60);
+          timerRef.current = window.setInterval(() => {
+              setTimeLeft(prev => {
+                  if (prev <= 1) {
+                      handleSubmitQuiz(true); // Time's up
+                      return 0;
+                  }
+                  return prev - 1;
+              });
+          }, 1000);
+      }
+
+      // Request Fullscreen for Exams
+      if (module.quiz.quizType === 'EXAM') {
+          document.documentElement.requestFullscreen().catch(e => {
+              console.warn("Fullscreen denied:", e);
+          });
+      }
   };
 
   const handleSubmitQuiz = (forceSubmit = false, disqualified = false) => {
@@ -225,7 +166,10 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
     if (quizStatus === 'COMPLETED' || quizStatus === 'DISQUALIFIED') return;
 
     // Clear intervals and listeners
-    if (timerRef.current) clearInterval(timerRef.current);
+    if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+    }
     
     // Exit Fullscreen
     if (document.fullscreenElement) {
@@ -234,9 +178,11 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
     
     const detailedAnswers: StudentAnswer[] = [];
     let totalScore = 0;
-    const maxScorePerQuestion = 10; 
+    
+    // SCORING UPDATE: Base score 100 per question
+    const maxScorePerQuestion = 100; 
 
-    // Calculate score based on ORIGINAL questions (not shuffled, or use ID map)
+    // Calculate score based on ORIGINAL questions order
     module.quiz.questions.forEach(q => {
         const studentAns = quizAnswers[q.id] || '';
         let currentScore = 0;
@@ -246,7 +192,8 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
                 currentScore = maxScorePerQuestion;
             }
         } else {
-            currentScore = 0; // Essay manual grading
+            // Essay score starts at 0 (Pending Grading), max is 100.
+            currentScore = 0; 
         }
 
         totalScore += currentScore;
@@ -262,7 +209,8 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
         });
     });
 
-    // Score Calculation
+    // Score Normalization: (Total Earned / Total Possible) * 100
+    // Example: 2 Questions. Total Possible = 200. Earned = 100. (100/200)*100 = 50.
     const maxPossibleScore = module.quiz.questions.length * maxScorePerQuestion;
     const finalNormalizedScore = maxPossibleScore > 0 ? Math.round((totalScore / maxPossibleScore) * 100) : 0;
     
@@ -273,743 +221,359 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
     setQuizStatus(disqualified ? 'DISQUALIFIED' : 'COMPLETED');
 
     if (onQuizSubmit && role === 'STUDENT') {
-        // Here we could also pass the violations count if API supported it
         onQuizSubmit(module.id, module.quiz.title, finalScore, detailedAnswers, violations, disqualified);
     }
   };
 
-  const resetQuiz = () => {
-    setQuizAnswers({});
-    setQuizStatus('IDLE');
-    setScore(0);
-    setViolations(0);
-    setTimeLeft(0);
-    setCurrentQuestionIndex(0);
-    setShuffledQuestions([]);
+  const handleAnswerChange = (qId: string, val: string) => {
+      setQuizAnswers(prev => ({ ...prev, [qId]: val }));
   };
 
+  const handleAskAI = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if(!chatInput.trim()) return;
+
+    const userMsg = chatInput;
+    setChatHistory(prev => [...prev, {role: 'user', text: userMsg}]);
+    setChatInput('');
+    setIsChatLoading(true);
+
+    const answer = await askAboutModule(module.title, module.description, userMsg);
+    
+    setChatHistory(prev => [...prev, {role: 'ai', text: answer || 'Maaf, saya tidak bisa menjawab saat ini.'}]);
+    setIsChatLoading(false);
+  };
+  
+  // Format Time: MM:SS
   const formatTime = (seconds: number) => {
       const m = Math.floor(seconds / 60);
       const s = seconds % 60;
       return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  // --- ANTI-CHEAT EFFECTS ---
-
-  useEffect(() => {
-      let interval: ReturnType<typeof setInterval>;
-      
-      if (quizStatus === 'RUNNING') {
-          // Timer Logic
-          if (timeLeft > 0) {
-              interval = setInterval(() => {
-                  setTimeLeft((prev) => {
-                      if (prev <= 1) {
-                          clearInterval(interval);
-                          handleSubmitQuiz(true, false); // Auto submit
-                          return 0;
-                      }
-                      return prev - 1;
-                  });
-              }, 1000);
-              timerRef.current = interval;
-          }
-
-          // Cheating Detection Listeners
-          const handleVisibilityChange = () => {
-              if (document.hidden) {
-                  triggerViolation("Anda meninggalkan tab ujian!");
-              }
-          };
-
-          const handleBlur = () => {
-              triggerViolation("Fokus jendela hilang. Dilarang membuka aplikasi lain!");
-          };
-
-          document.addEventListener("visibilitychange", handleVisibilityChange);
-          window.addEventListener("blur", handleBlur);
-
-          return () => {
-              clearInterval(interval);
-              document.removeEventListener("visibilitychange", handleVisibilityChange);
-              window.removeEventListener("blur", handleBlur);
-          };
-      }
-  }, [quizStatus, timeLeft]);
-
-  const triggerViolation = (msg: string) => {
-      if (quizStatus !== 'RUNNING') return;
-      
-      setViolations(prev => {
-          const newCount = prev + 1;
-          setViolationMsg(`${msg} (Peringatan ${newCount}/${MAX_VIOLATIONS})`);
-          
-          // Clear toast after 3s
-          setTimeout(() => setViolationMsg(null), 4000);
-
-          if (newCount >= MAX_VIOLATIONS) {
-              handleSubmitQuiz(true, true); // Disqualify
-          }
-          return newCount;
-      });
-  };
+  const isExam = module.quiz?.quizType === 'EXAM';
+  const isPublished = module.quiz?.isPublished ?? false;
 
   const renderScheduleBadge = () => {
       if (!module.quiz || (!module.quiz.startDate && !module.quiz.endDate)) return null;
       
-      const status = checkSchedule().status;
-      if (status === 'NOT_STARTED') {
+      const schedule = checkSchedule();
+      if (schedule.status === 'NOT_STARTED') {
            return (
-               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-100 text-slate-500 text-xs font-bold border border-slate-200">
-                   <CalendarClock size={14}/> Belum Mulai
+               <div className="flex items-center gap-1.5 px-3 py-1 bg-slate-100 text-slate-500 rounded-full text-xs font-bold border border-slate-200">
+                   <CalendarClock size={12}/> Belum Mulai
                </div>
            );
-      } else if (status === 'EXPIRED') {
+      } else if (schedule.status === 'EXPIRED') {
            return (
-               <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-50 text-red-700 text-xs font-bold border border-red-100">
-                   <Lock size={14}/> Ditutup
+               <div className="flex items-center gap-1.5 px-3 py-1 bg-red-50 text-red-700 rounded-full text-xs font-bold border border-red-100">
+                   <Lock size={12}/> Ditutup
                </div>
            );
-      } else {
-           // Show deadline if open and deadline exists
-           if (module.quiz.endDate) {
-               return (
-                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-100">
-                       <Clock size={14}/> Sisa Waktu
-                   </div>
-               );
-           }
+      } else if (module.quiz.endDate) {
+           return (
+               <div className="flex items-center gap-1.5 px-3 py-1 bg-blue-50 text-blue-700 rounded-full text-xs font-bold border border-blue-100">
+                   <Clock size={12}/> Terjadwal
+               </div>
+           );
       }
       return null;
   };
 
   return (
-    <>
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-lg transition-all duration-300 flex flex-col h-full group">
-      {/* Card Header with Icon and Category */}
-      <div className={`h-32 p-6 flex flex-col justify-between relative overflow-hidden`}>
-        <div className="absolute inset-0 bg-gradient-to-br from-indigo-500 to-violet-600 opacity-90"></div>
-        <div className="absolute -right-4 -top-4 text-white opacity-10 transform rotate-12">
-            <BookOpen size={120} />
-        </div>
+    <div className={`bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full hover:shadow-md transition-shadow relative ${quizStatus === 'IN_PROGRESS' && isExam ? 'z-[100] fixed inset-0 m-0 rounded-none' : ''}`}>
         
-        <div className="relative z-10 flex justify-between items-start">
-          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/20 text-white backdrop-blur-sm">
-            {module.category}
-          </span>
-          {role === 'ADMIN' && (
-             <div className="flex gap-2">
-                 {onEdit && (
-                    <button 
-                        onClick={() => onEdit(module)}
-                        className="text-white/70 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
-                        title="Edit Modul"
-                    >
-                        <Pencil size={18} />
-                    </button>
-                 )}
-                 {onDelete && (
-                    <button 
-                        onClick={() => onDelete(module.id)}
-                        className="text-white/70 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
-                        title="Hapus Modul"
-                    >
-                        <Trash2 size={18} />
-                    </button>
-                 )}
-             </div>
-          )}
-        </div>
-        
-        <h3 className="relative z-10 text-xl font-bold text-white leading-tight line-clamp-2">
-          {module.title}
-        </h3>
-      </div>
-
-      {/* Card Body */}
-      <div className="p-6 flex-1 flex flex-col">
-        <div className="mb-4">
-           {module.aiSummary ? (
-             <div className="bg-indigo-50 p-3 rounded-xl border border-indigo-100 mb-3">
-               <div className="flex items-center gap-2 text-indigo-700 mb-1">
-                 <Sparkles size={14} />
-                 <span className="text-xs font-bold uppercase tracking-wider">Ringkasan AI</span>
-               </div>
-               <p className="text-sm text-slate-700 leading-relaxed">{module.aiSummary}</p>
-             </div>
-           ) : (
-             <p className="text-sm text-slate-500 line-clamp-3 mb-4">{module.description}</p>
-           )}
-           
-           <div className="flex flex-wrap gap-2 mt-2">
-             {module.tags.map(tag => (
-               <span key={tag} className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded-md">
-                 #{tag}
-               </span>
-             ))}
-           </div>
-           
-           <div className="flex flex-wrap gap-2 mt-3">
-               {/* Quiz Indicator Badge */}
-               {module.quiz && (
-                   <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${isPublished ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
-                       {isPublished ? <BrainCircuit size={14}/> : <Archive size={14}/>}
-                       {isPublished ? `${module.quiz.questions.length} Soal` : 'Bank Soal / Draft'}
-                   </div>
-               )}
-               {/* Duration Badge */}
-                {module.quiz?.duration && isPublished ? (
-                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-100">
-                       <Timer size={14}/>
-                       {module.quiz.duration} Menit
-                   </div>
-                ) : null}
-
-               {/* Schedule Badge */}
-               {isPublished && renderScheduleBadge()}
-
-               {/* Target Classes Badge */}
-               {module.targetClasses && module.targetClasses.length > 0 && (
-                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-700 text-xs font-bold border border-blue-100" title={`Kelas: ${module.targetClasses.join(', ')}`}>
-                       <Users size={14}/>
-                       {module.targetClasses.length > 2 ? `${module.targetClasses.length} Kelas` : module.targetClasses.join(', ')}
-                   </div>
-               )}
-           </div>
-
-        </div>
-
-        <div className="mt-auto pt-4 border-t border-slate-100 flex flex-col gap-3">
-            <div className="flex gap-2">
-                {module.quiz && (
-                    <button 
-                        onClick={openQuizModal}
-                        disabled={(role === 'STUDENT' && checkSchedule().status !== 'OPEN') || (role === 'STUDENT' && !isPublished)}
-                        className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-md transition-all ${
-                            (role === 'STUDENT' && checkSchedule().status !== 'OPEN') || (role === 'STUDENT' && !isPublished)
-                            ? 'bg-slate-400 cursor-not-allowed opacity-70' 
-                            : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200 hover:scale-[1.02]'
-                        }`}
-                    >
-                        {role === 'STUDENT' && !isPublished ? <Archive size={18}/> : 
-                         role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? <Lock size={18} /> : 
-                         <BrainCircuit size={18} />}
-                        
-                        {
-                            role === 'STUDENT' && !isPublished ? 'Belum Rilis' :
-                            role === 'STUDENT' && checkSchedule().status === 'NOT_STARTED' ? 'Belum Dibuka' :
-                            role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? 'Ujian Ditutup' :
-                            (module.quiz.quizType === 'EXAM' ? 'Kerjakan Ujian' : 'Mulai Latihan')
-                        }
-                    </button>
-                )}
-                
-                <a 
-                href={module.fileUrl || '#'} 
-                download={module.fileName}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white transition-all shadow-md hover:shadow-lg ${!module.fileUrl ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
-                onClick={handleDownload}
-                >
-                <Download size={18} />
-                Unduh
-                </a>
-            </div>
-
-            {role === 'STUDENT' && (
-              <button 
-                onClick={() => setShowAIHelp(!showAIHelp)}
-                className={`w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${showAIHelp ? 'bg-indigo-100 text-indigo-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-50'}`}
-              >
-                <MessageCircle size={16} />
-                {showAIHelp ? 'Tutup Tutor AI' : 'Tanya Tutor AI'}
-              </button>
-            )}
-        </div>
-      </div>
-
-      {/* AI Chat Drawer - CHAT UI */}
-      {showAIHelp && (
-        <div className="bg-slate-100 border-t border-slate-200 flex flex-col h-96 animate-in slide-in-from-bottom-5 duration-300">
-          
-          {/* Header Chat */}
-          <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
-             <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-               <Sparkles size={16} className="text-indigo-500 fill-indigo-100"/> Tutor AI
-             </h4>
-             <button 
-                onClick={resetChat} 
-                className="text-xs font-bold text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
-             >
-                Reset Chat
-             </button>
-          </div>
-          
-          {/* Chat Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-100 scrollbar-thin">
-             {chatHistory.length === 0 && !isLoading ? (
-                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center opacity-70">
-                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mb-3 shadow-sm">
-                        <Bot size={24} className="text-indigo-300"/>
-                    </div>
-                    <p className="text-sm font-medium text-slate-500">Mulai diskusi dengan Tutor AI</p>
-                    <p className="text-xs">Tanyakan apa saja tentang materi ini!</p>
-                 </div>
-             ) : (
-                 chatHistory.map((msg) => (
-                     <div key={msg.id} className={`flex gap-3 animate-in fade-in slide-in-from-bottom-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                         
-                         {/* Avatar */}
-                         <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
-                             msg.role === 'user' 
-                             ? 'bg-indigo-600 text-white border-indigo-600' 
-                             : 'bg-white border-slate-200 text-indigo-600'
-                         }`}>
-                             {msg.role === 'user' ? <User size={16}/> : <Bot size={16}/>}
-                         </div>
-
-                         {/* Bubble */}
-                         <div className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap ${
-                             msg.role === 'user' 
-                             ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none' 
-                             : 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-none'
-                         }`}>
-                             {msg.text}
-                         </div>
-                     </div>
-                 ))
-             )}
-
-             {/* Loading Bubble */}
-             {isLoading && (
-                 <div className="flex gap-3 animate-pulse">
-                     <div className="w-8 h-8 rounded-full bg-white border border-slate-200 text-indigo-600 flex items-center justify-center shrink-0 shadow-sm">
-                         <Bot size={16}/>
-                     </div>
-                     <div className="bg-white border border-slate-200 px-4 py-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-1.5 w-fit">
-                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"></div>
-                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-75"></div>
-                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-150"></div>
-                     </div>
-                 </div>
-             )}
-             
-             {/* Invisible anchor for scrolling */}
-             <div ref={chatEndRef} />
-          </div>
-
-          {/* Input Area */}
-          <div className="p-3 bg-white border-t border-slate-200 shrink-0">
-            <div className="relative flex items-center gap-2">
-                <input 
-                  type="text" 
-                  value={question}
-                  onChange={(e) => setQuestion(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && handleAskAI()}
-                  placeholder="Ketik pertanyaanmu di sini..."
-                  className="w-full pl-4 pr-12 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-inner"
-                  disabled={isLoading}
-                />
-                <button 
-                  onClick={handleAskAI}
-                  disabled={isLoading || !question.trim()}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shadow-md"
-                >
-                  <Send size={16} />
-                </button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-
-    {/* QUIZ MODAL OVERLAY */}
-    {/* ... (Existing Quiz Modal Code - unchanged) ... */}
-    {isQuizOpen && module.quiz && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-            {/* VIOLATION TOAST */}
-            {violationMsg && (
-                <div className="absolute top-10 left-1/2 -translate-x-1/2 z-[120] bg-red-600 text-white px-6 py-4 rounded-xl shadow-2xl flex items-center gap-3 animate-bounce font-bold border-2 border-white/20">
-                    <AlertTriangle size={24} className="animate-pulse"/>
-                    <span>{violationMsg}</span>
-                </div>
-            )}
-
-            <div className="bg-white w-full max-w-4xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden relative">
-                
-                {/* Timer Bar (Top) */}
-                {quizStatus === 'RUNNING' && timeLeft !== -1 && (
-                    <div className="h-1.5 w-full bg-slate-100">
-                        <div 
-                            className={`h-full transition-all duration-1000 ${timeLeft < 60 ? 'bg-red-500' : 'bg-indigo-500'}`}
-                            style={{ width: `${(timeLeft / ((module.quiz.duration || 1) * 60)) * 100}%` }}
-                        ></div>
-                    </div>
-                )}
-
-                {/* Quiz Header */}
-                <div className="p-4 md:p-6 border-b border-slate-200 flex justify-between items-center bg-white z-10">
+        {/* === EXAM MODE FULLSCREEN OVERLAY === */}
+        {quizStatus === 'IN_PROGRESS' && isExam && (
+            <div className="absolute top-0 left-0 right-0 bg-slate-900 text-white p-4 flex justify-between items-center z-50">
+                <div className="flex items-center gap-4">
+                    <BrainCircuit size={24} className="text-yellow-400 animate-pulse"/>
                     <div>
-                        <div className="flex items-center gap-2 text-indigo-600 mb-1">
-                            {module.quiz.quizType === 'EXAM' ? <GraduationCap size={20} /> : <BrainCircuit size={20} />}
-                            <span className="text-xs font-bold uppercase tracking-wider">
-                                {module.quiz.quizType === 'EXAM' ? 'Ujian Resmi' : 'Mode Latihan'}
-                            </span>
-                        </div>
-                        <h2 className="text-xl md:text-2xl font-bold text-slate-800 line-clamp-1">{module.quiz.title}</h2>
+                        <h3 className="font-bold text-lg">MODE UJIAN</h3>
+                        <p className="text-xs text-slate-400">Jangan keluar dari layar penuh atau membuka tab lain.</p>
                     </div>
-                    
-                    <div className="flex items-center gap-3">
-                        {quizStatus === 'RUNNING' && (
-                            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg font-mono font-bold ${timeLeft < 60 ? 'bg-red-100 text-red-600 animate-pulse' : 'bg-slate-100 text-slate-700'}`}>
-                                <Timer size={18}/>
-                                {timeLeft === -1 ? '∞' : formatTime(timeLeft)}
-                            </div>
-                        )}
-                        
-                        {/* Violations Counter */}
-                        {quizStatus === 'RUNNING' && violations > 0 && (
-                            <div className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-red-100 text-red-600 font-bold text-xs" title="Peringatan Pelanggaran">
-                                <AlertTriangle size={16}/> {violations}/{MAX_VIOLATIONS}
-                            </div>
-                        )}
+                </div>
+                <div className="flex items-center gap-6">
+                     <div className="text-center">
+                         <p className="text-xs font-bold text-slate-400 uppercase">Sisa Waktu</p>
+                         <p className={`text-xl font-mono font-bold ${timeLeft < 60 ? 'text-red-500 animate-pulse' : 'text-white'}`}>{formatTime(timeLeft)}</p>
+                     </div>
+                     <button 
+                        onClick={() => handleSubmitQuiz(false)}
+                        className="bg-red-600 hover:bg-red-700 px-6 py-2 rounded-lg font-bold text-sm"
+                     >
+                        Selesai
+                     </button>
+                </div>
+            </div>
+        )}
 
-                        <button 
-                            onClick={() => setIsQuizOpen(false)}
-                            className="p-2 rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
-                        >
-                            <X size={24} />
+        {/* === NORMAL CARD VIEW === */}
+        <div className={`p-5 flex flex-col h-full ${quizStatus === 'IN_PROGRESS' && isExam ? 'pt-24 h-screen overflow-y-auto' : ''}`}>
+            
+            {/* Header: Type & Action */}
+            <div className="flex items-start justify-between mb-4">
+                <div className={`p-2 rounded-xl ${module.quiz ? 'bg-indigo-100 text-indigo-600' : 'bg-slate-100 text-slate-600'}`}>
+                    {module.quiz ? <BrainCircuit size={24} /> : <FileText size={24} />}
+                </div>
+                {role === 'ADMIN' && (
+                    <div className="flex gap-2">
+                        <button onClick={() => onEdit?.(module)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-indigo-600 transition-colors">
+                            <Edit size={16}/>
+                        </button>
+                        <button onClick={() => onDelete?.(module.id)} className="p-2 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-600 transition-colors">
+                            <Trash2 size={16}/>
                         </button>
                     </div>
-                </div>
+                )}
+            </div>
 
-                {/* Quiz Body */}
-                <div className="flex-1 overflow-y-auto p-4 md:p-8 bg-slate-50 flex flex-col">
-                    {quizStatus === 'IDLE' ? (
-                        /* --- START SCREEN --- */
-                        <div className="flex flex-col items-center justify-center h-full text-center">
-                            <div className="w-24 h-24 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center mb-6 shadow-sm">
-                                <Lock size={48} />
-                            </div>
-                            <h3 className="text-2xl font-bold text-slate-800 mb-2">Persiapan {module.quiz.quizType === 'EXAM' ? 'Ujian' : 'Latihan'}</h3>
-                            <p className="text-slate-500 max-w-md mb-8">
-                                {module.quiz.quizType === 'EXAM' 
-                                    ? 'Ujian ini bersifat rahasia. Soal akan diacak dan hasil tidak akan ditampilkan setelah pengerjaan.'
-                                    : 'Latihan ini untuk menguji pemahaman Anda. Hasil dan kunci jawaban akan ditampilkan setelah selesai.'
-                                }
+            {/* Content Info */}
+            <h3 className="text-lg font-bold text-slate-800 mb-2 line-clamp-2" title={module.title}>
+                {module.title}
+            </h3>
+            
+            {/* Badges Row */}
+            <div className="flex flex-wrap items-center gap-2 mb-4">
+                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded uppercase tracking-wider">
+                    {module.category}
+                </span>
+                
+                {module.quiz && (
+                    <>
+                        <span className={`text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider flex items-center gap-1 ${isPublished ? 'bg-emerald-50 text-emerald-600' : 'bg-orange-50 text-orange-600'}`}>
+                            {isPublished ? <Globe size={10}/> : <Archive size={10}/>}
+                            {isPublished ? 'Terbit' : 'Draft'}
+                        </span>
+                        {isPublished && renderScheduleBadge()}
+                    </>
+                )}
+            </div>
+
+            {/* Description/Summary */}
+            <div className={`text-sm text-slate-600 mb-6 relative transition-all duration-300 ${isExpanded ? 'line-clamp-none' : 'line-clamp-3'}`}>
+                {module.aiSummary ? (
+                    <div className="bg-indigo-50/50 p-3 rounded-lg border border-indigo-50">
+                        <p className="text-xs font-bold text-indigo-600 mb-1 flex items-center gap-1">
+                            <BrainCircuit size={12}/> Ringkasan AI
+                        </p>
+                        {module.aiSummary}
+                    </div>
+                ) : (
+                    module.description
+                )}
+            </div>
+
+            {/* --- QUIZ AREA (Inside Card) --- */}
+            {module.quiz && (
+                <div className="mt-auto bg-slate-50 rounded-xl p-4 border border-slate-100">
+                    <div className="flex items-center justify-between mb-3">
+                        <div>
+                            <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                                {module.quiz.quizType === 'EXAM' ? 'Ujian Resmi' : 'Latihan Soal'}
                             </p>
-                            
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 max-w-lg w-full mb-8 text-left">
-                                <div className="p-4 bg-white border border-slate-200 rounded-xl flex items-start gap-3">
-                                    <Timer className="text-indigo-500 shrink-0 mt-0.5" size={20}/>
-                                    <div>
-                                        <p className="font-bold text-slate-700 text-sm">Durasi Waktu</p>
-                                        <p className="text-xs text-slate-500">{module.quiz.duration ? `${module.quiz.duration} Menit` : 'Tidak Dibatasi'}</p>
-                                    </div>
-                                </div>
-                                <div className="p-4 bg-white border border-slate-200 rounded-xl flex items-start gap-3">
-                                    <CalendarClock className="text-indigo-500 shrink-0 mt-0.5" size={20}/>
-                                    <div>
-                                        <p className="font-bold text-slate-700 text-sm">Tenggat Waktu</p>
-                                        <p className="text-xs text-slate-500">
-                                            {module.quiz.endDate 
-                                                ? new Date(module.quiz.endDate).toLocaleString('id-ID')
-                                                : 'Tidak ada tenggat'}
-                                        </p>
-                                    </div>
-                                </div>
-                                <div className="p-4 bg-white border border-slate-200 rounded-xl flex items-start gap-3 md:col-span-2">
-                                    <AlertTriangle className="text-red-500 shrink-0 mt-0.5" size={20}/>
-                                    <div>
-                                        <p className="font-bold text-red-600 text-sm">Peringatan Anti-Cheat</p>
-                                        <p className="text-xs text-slate-500">Dilarang pindah tab, minimize browser, atau membuka aplikasi lain. 3x pelanggaran = Diskualifikasi.</p>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <button 
-                                onClick={startExam}
-                                className="px-8 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95 flex items-center gap-2"
-                            >
-                                <CheckCircle size={20}/> Mulai Kerjakan Sekarang
-                            </button>
+                            <p className="text-sm font-bold text-slate-800">
+                                {module.quiz.questions.length} Soal
+                            </p>
                         </div>
-                    ) : quizStatus === 'RUNNING' ? (
-                        /* --- ACTIVE QUESTIONS (ONE PER PAGE) --- */
-                        <div className="flex flex-col h-full max-w-4xl mx-auto w-full">
-                            
-                            {/* Question Navigation Map */}
-                            <div className="mb-6 overflow-x-auto pb-2 scrollbar-hide">
-                                <div className="flex gap-2">
-                                    {shuffledQuestions.map((_, idx) => {
-                                        const isAnswered = !!quizAnswers[shuffledQuestions[idx].id];
-                                        const isCurrent = currentQuestionIndex === idx;
-                                        return (
-                                            <button 
-                                                key={idx}
-                                                onClick={() => setCurrentQuestionIndex(idx)}
-                                                className={`w-10 h-10 rounded-lg flex items-center justify-center text-sm font-bold transition-all border shrink-0
-                                                    ${isCurrent 
-                                                        ? 'bg-indigo-600 text-white border-indigo-600 shadow-md transform scale-110 z-10' 
-                                                        : (isAnswered 
-                                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200' 
-                                                            : 'bg-white text-slate-400 border-slate-200 hover:border-indigo-300')
-                                                    }`}
-                                            >
-                                                {idx + 1}
-                                            </button>
-                                        );
-                                    })}
+                        {module.quiz.duration && module.quiz.duration > 0 && (
+                            <div className="text-right">
+                                <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Durasi</p>
+                                <p className="text-sm font-bold text-slate-800 flex items-center gap-1 justify-end">
+                                    <Timer size={14}/> {module.quiz.duration} Menit
+                                </p>
+                            </div>
+                        )}
+                    </div>
+
+                    {quizStatus === 'IDLE' ? (
+                        <button 
+                            onClick={handleStartQuiz}
+                            disabled={role === 'STUDENT' && (!isPublished || checkSchedule().status !== 'OPEN')}
+                            className="w-full flex items-center justify-center gap-2 bg-indigo-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-700 transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed disabled:bg-slate-400"
+                        >
+                            <Play size={16} fill="currentColor"/> 
+                            {role === 'STUDENT' && !isPublished ? 'Belum Rilis' :
+                             role === 'STUDENT' && checkSchedule().status === 'NOT_STARTED' ? 'Belum Mulai' :
+                             role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? 'Ditutup' :
+                             'Mulai Kerjakan'}
+                        </button>
+                    ) : quizStatus === 'COMPLETED' || quizStatus === 'DISQUALIFIED' ? (
+                        <div className="text-center py-2">
+                             {quizStatus === 'DISQUALIFIED' ? (
+                                <div className="text-red-600 font-bold flex flex-col items-center">
+                                    <Ban size={32} className="mb-2"/>
+                                    <p>DISKUALIFIKASI</p>
                                 </div>
-                            </div>
-
-                            {/* Active Question Card */}
-                            {shuffledQuestions.length > 0 && (
-                                (() => {
-                                    const activeQ = shuffledQuestions[currentQuestionIndex];
-                                    return (
-                                        <div key={activeQ.id} className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex-1 overflow-y-auto animate-in fade-in slide-in-from-right-4 duration-300">
-                                            <div className="flex items-start gap-4 mb-6">
-                                                <span className="flex-shrink-0 w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center font-bold text-lg shadow-lg">
-                                                    {currentQuestionIndex + 1}
-                                                </span>
-                                                <div className="flex-1">
-                                                    <p className="text-xl font-medium text-slate-800 leading-relaxed">{activeQ.question}</p>
-                                                </div>
-                                            </div>
-
-                                            {activeQ.imageUrl && (
-                                                <div className="mb-6 rounded-xl overflow-hidden border border-slate-100 shadow-sm bg-slate-50 max-h-[400px] flex items-center justify-center">
-                                                    <img 
-                                                        src={activeQ.imageUrl} 
-                                                        alt="Ilustrasi Soal" 
-                                                        className="max-w-full max-h-[400px] object-contain"
-                                                        loading="lazy"
-                                                    />
-                                                </div>
-                                            )}
-                                            
-                                            <div className="pl-0 md:pl-14">
-                                                {activeQ.type === 'MULTIPLE_CHOICE' && activeQ.options ? (
-                                                    <div className="grid grid-cols-1 gap-3">
-                                                        {activeQ.options.map((opt, i) => (
-                                                            <label 
-                                                                key={i} 
-                                                                className={`flex items-center gap-4 p-4 rounded-xl border-2 cursor-pointer transition-all hover:shadow-md ${
-                                                                    quizAnswers[activeQ.id] === opt 
-                                                                    ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500' 
-                                                                    : 'border-slate-100 hover:border-indigo-200 hover:bg-slate-50'
-                                                                }`}
-                                                            >
-                                                                <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${quizAnswers[activeQ.id] === opt ? 'border-indigo-600' : 'border-slate-300'}`}>
-                                                                    {quizAnswers[activeQ.id] === opt && <div className="w-3 h-3 bg-indigo-600 rounded-full"></div>}
-                                                                </div>
-                                                                <input 
-                                                                    type="radio" 
-                                                                    name={`question-${activeQ.id}`}
-                                                                    value={opt}
-                                                                    checked={quizAnswers[activeQ.id] === opt}
-                                                                    onChange={() => handleOptionSelect(activeQ.id, opt)}
-                                                                    className="hidden"
-                                                                />
-                                                                <span className={`text-base ${quizAnswers[activeQ.id] === opt ? 'text-indigo-900 font-semibold' : 'text-slate-600'}`}>{opt}</span>
-                                                            </label>
-                                                        ))}
-                                                    </div>
-                                                ) : (
-                                                    <div className="relative">
-                                                        <textarea 
-                                                            className="w-full p-5 rounded-xl border-2 border-slate-200 focus:border-indigo-500 focus:ring-0 outline-none text-slate-700 min-h-[200px] text-base leading-relaxed bg-slate-50 focus:bg-white transition-colors"
-                                                            placeholder="Tulis jawaban esai Anda secara lengkap di sini..."
-                                                            value={quizAnswers[activeQ.id] || ''}
-                                                            onChange={(e) => handleOptionSelect(activeQ.id, e.target.value)}
-                                                        />
-                                                        <div className="absolute bottom-4 right-4 text-slate-400 pointer-events-none">
-                                                            <Pencil size={18}/>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </div>
+                             ) : (
+                                <div>
+                                    <p className="text-xs font-bold text-slate-500 uppercase mb-1">Nilai Anda</p>
+                                    {module.quiz.quizType === 'EXAM' ? (
+                                        <div className="bg-blue-50 text-blue-700 p-2 rounded text-xs font-bold">
+                                            Menunggu Hasil
                                         </div>
-                                    );
-                                })()
-                            )}
-
-                            {/* Bottom Navigation Buttons */}
-                            <div className="mt-6 flex justify-between items-center pt-4 border-t border-slate-200">
-                                <button 
-                                    onClick={() => setCurrentQuestionIndex(prev => Math.max(0, prev - 1))}
-                                    disabled={currentQuestionIndex === 0}
-                                    className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                                >
-                                    <ChevronLeft size={20} /> Sebelumnya
-                                </button>
-
-                                {currentQuestionIndex === shuffledQuestions.length - 1 ? (
-                                    <button 
-                                        onClick={() => handleSubmitQuiz(false)}
-                                        className="flex items-center gap-2 px-8 py-3 rounded-xl font-bold text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-transform active:scale-95"
-                                    >
-                                        Selesai & Kirim <CheckCircle size={20}/>
-                                    </button>
-                                ) : (
-                                    <button 
-                                        onClick={() => setCurrentQuestionIndex(prev => Math.min(shuffledQuestions.length - 1, prev + 1))}
-                                        className="flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-white bg-slate-800 hover:bg-slate-900 shadow-md transition-colors"
-                                    >
-                                        Selanjutnya <ChevronRight size={20}/>
-                                    </button>
-                                )}
-                            </div>
+                                    ) : (
+                                        <p className="text-3xl font-black text-emerald-600">{score}</p>
+                                    )}
+                                </div>
+                             )}
                         </div>
                     ) : (
-                        /* --- RESULT SCREEN --- */
-                        <div className="max-w-2xl mx-auto w-full">
-                            <div className="bg-white rounded-2xl shadow-lg border border-indigo-100 p-8 text-center mb-8 relative overflow-hidden">
-                                {quizStatus === 'DISQUALIFIED' ? (
-                                    <>
-                                        <div className="absolute top-0 left-0 w-full h-2 bg-red-500"></div>
-                                        <div className="w-20 h-20 bg-red-100 text-red-600 rounded-full flex items-center justify-center mx-auto mb-4">
-                                            <Ban size={40} />
-                                        </div>
-                                        <h3 className="text-2xl font-bold text-red-600">Akses Diblokir!</h3>
-                                        <p className="text-slate-500 mb-4 font-medium">Anda telah melakukan {MAX_VIOLATIONS}x pelanggaran.</p>
-                                        
-                                        <div className="bg-red-50 border border-red-100 p-4 rounded-xl text-sm text-red-700 inline-block mb-6">
-                                            <p className="font-bold mb-1 flex items-center justify-center gap-2">
-                                                <Lock size={16}/> Akun Dikunci Sementara
-                                            </p>
-                                            Hubungi Administrator / Guru untuk mereset pelanggaran dan membuka kembali akses ujian ini.
-                                        </div>
-                                    </>
-                                ) : (
-                                    <>
-                                        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
-                                        <div className="w-20 h-20 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
-                                            <CheckCircle size={40} />
-                                        </div>
-                                        <h3 className="text-2xl font-bold text-slate-800">Ujian Telah Diserahkan</h3>
-                                        <p className="text-slate-500 mb-4">Jawaban Anda berhasil disimpan ke sistem.</p>
-                                        
-                                        {/* HIDE SCORE IF EXAM MODE */}
-                                        {module.quiz.quizType === 'EXAM' ? (
-                                            <div className="bg-blue-50 border border-blue-200 p-6 rounded-xl text-left">
-                                                <h4 className="font-bold text-blue-800 mb-2 flex items-center gap-2">
-                                                    <Lock size={18}/> Menunggu Hasil
-                                                </h4>
-                                                <p className="text-sm text-blue-700">
-                                                    Karena ini adalah <strong>Ujian Resmi</strong>, nilai dan kunci jawaban tidak ditampilkan saat ini.
-                                                </p>
-                                                <p className="text-sm text-blue-700 mt-2">
-                                                    Guru akan memeriksa jawaban esai (jika ada) dan merilis nilai akhir nanti.
-                                                </p>
-                                            </div>
-                                        ) : (
-                                            <>
-                                                <div className="text-5xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600 mb-2">
-                                                    {score} <span className="text-xl text-slate-400 font-medium">/ 100</span>
-                                                </div>
-                                                
-                                                {/* Essay Pending Notification */}
-                                                {module.quiz.questions.some(q => q.type === 'ESSAY') && (
-                                                    <div className="mt-4 p-3 bg-amber-50 border border-amber-200 rounded-lg flex items-center gap-3 text-left">
-                                                        <div className="p-2 bg-amber-100 rounded-full text-amber-600 shrink-0">
-                                                            <Sparkles size={16} />
-                                                        </div>
-                                                        <div>
-                                                            <p className="text-sm font-bold text-amber-800">Nilai Menunggu Koreksi</p>
-                                                            <p className="text-xs text-amber-700">Soal esai akan dinilai manual oleh guru. Nilai total Anda akan diperbarui setelah dikoreksi.</p>
-                                                        </div>
-                                                    </div>
-                                                )}
-                                            </>
-                                        )}
-                                    </>
-                                )}
-                            </div>
-
-                            {/* Review Answers (Only if not disqualified AND not Exam mode) */}
-                            {quizStatus !== 'DISQUALIFIED' && module.quiz.quizType !== 'EXAM' && (
-                                <div className="space-y-6">
-                                    <h4 className="font-bold text-slate-700 border-b pb-2 flex items-center gap-2">
-                                        <List size={20}/> Review Jawaban
-                                    </h4>
-                                    {module.quiz.questions.map((q, index) => {
-                                        const isCorrect = quizAnswers[q.id] === q.correctAnswer;
-                                        const isEssay = q.type === 'ESSAY';
-
-                                        return (
-                                            <div key={q.id} className={`p-5 rounded-xl border ${isEssay ? 'bg-white border-slate-200' : (isCorrect ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200')}`}>
-                                                <div className="flex gap-3">
-                                                    <div className="mt-1">
-                                                        {isEssay ? (
-                                                            <div className="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs">{index + 1}</div>
-                                                        ) : (
-                                                            isCorrect ? <CheckCircle className="text-green-600" size={24} /> : <XCircle className="text-red-600" size={24} />
-                                                        )}
-                                                    </div>
-                                                    <div className="flex-1">
-                                                        <p className="font-medium text-slate-800 mb-2">{q.question}</p>
-                                                        
-                                                        {/* User Answer */}
-                                                        <div className="mb-2">
-                                                            <span className="text-xs font-bold text-slate-500 uppercase">Jawaban Kamu:</span>
-                                                            <p className={`text-sm mt-1 whitespace-pre-wrap ${isEssay ? 'text-slate-700 italic border-l-2 border-slate-300 pl-3' : (isCorrect ? 'text-green-700 font-bold' : 'text-red-700 font-bold line-through')}`}>
-                                                                {quizAnswers[q.id] || '(Tidak dijawab)'}
-                                                            </p>
-                                                        </div>
-
-                                                        {/* Correct Answer */}
-                                                        {(!isCorrect || isEssay) && (
-                                                            <div className="bg-white/50 p-2 rounded border border-black/5 mt-2">
-                                                                <span className="text-xs font-bold text-slate-500 uppercase">{isEssay ? 'Kunci Jawaban / Referensi:' : 'Jawaban Benar:'}</span>
-                                                                <p className="text-sm text-slate-800 font-semibold">{q.correctAnswer}</p>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        );
-                                    })}
-                                </div>
-                            )}
+                        <div className="text-center py-2">
+                            <p className="text-sm font-bold text-indigo-600 animate-pulse">Sedang Mengerjakan...</p>
                         </div>
                     )}
                 </div>
+            )}
 
-                {/* Footer Actions (Only visible in IDLE or RESULT state, hidden in RUNNING because buttons are now inside content) */}
-                {quizStatus !== 'RUNNING' && (
-                    <div className="p-4 md:p-6 border-t border-slate-200 bg-white flex justify-end gap-3 z-10">
-                        {quizStatus === 'IDLE' ? (
-                            <button 
-                                onClick={() => setIsQuizOpen(false)}
-                                className="px-6 py-2 rounded-xl font-bold text-slate-500 hover:bg-slate-100 transition-colors"
-                            >
-                                Batal
-                            </button>
-                        ) : (
-                            <>
-                                {quizStatus !== 'DISQUALIFIED' && module.quiz.quizType !== 'EXAM' && (
-                                    <button 
-                                        onClick={resetQuiz}
-                                        className="px-6 py-3 rounded-xl font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 transition-colors flex items-center gap-2"
-                                    >
-                                        <RotateCcw size={18}/> Ulangi Kuis
-                                    </button>
+            {/* IN-PROGRESS QUIZ QUESTIONS RENDER */}
+            {quizStatus === 'IN_PROGRESS' && (
+                <div className={`mt-6 ${isExam ? 'max-w-3xl mx-auto w-full' : ''}`}>
+                    {module.quiz?.questions.map((q, idx) => (
+                        <div key={q.id} className="mb-6 p-4 bg-slate-50 rounded-xl border border-slate-200">
+                            <div className="flex gap-3 mb-3">
+                                <span className="bg-slate-200 text-slate-700 w-6 h-6 flex items-center justify-center rounded font-bold text-xs shrink-0">
+                                    {idx + 1}
+                                </span>
+                                <div className="flex-1">
+                                    <p className="text-sm font-bold text-slate-800 mb-2">{q.question}</p>
+                                    {q.imageUrl && (
+                                        <img src={q.imageUrl} alt="Soal" className="max-w-full h-auto max-h-48 rounded-lg mb-3 object-contain border border-slate-200 bg-white"/>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="pl-9 space-y-2">
+                                {q.type === 'MULTIPLE_CHOICE' ? (
+                                    q.options?.map((opt, optIdx) => (
+                                        <label key={optIdx} className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${quizAnswers[q.id] === opt ? 'bg-indigo-100 border-indigo-300' : 'bg-white border-slate-200 hover:bg-slate-100'}`}>
+                                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${quizAnswers[q.id] === opt ? 'border-indigo-600' : 'border-slate-300'}`}>
+                                                {quizAnswers[q.id] === opt && <div className="w-2 h-2 bg-indigo-600 rounded-full"></div>}
+                                            </div>
+                                            <input 
+                                                type="radio" 
+                                                name={q.id} 
+                                                value={opt}
+                                                checked={quizAnswers[q.id] === opt}
+                                                onChange={() => handleAnswerChange(q.id, opt)}
+                                                className="hidden"
+                                            />
+                                            <span className="text-sm text-slate-700">{opt}</span>
+                                        </label>
+                                    ))
+                                ) : (
+                                    <textarea 
+                                        value={quizAnswers[q.id] || ''}
+                                        onChange={(e) => handleAnswerChange(q.id, e.target.value)}
+                                        className="w-full p-3 rounded-lg border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        rows={3}
+                                        placeholder="Tulis jawaban esai Anda..."
+                                    />
                                 )}
-                                <button 
-                                    onClick={() => setIsQuizOpen(false)}
-                                    className="px-6 py-3 rounded-xl font-bold text-white bg-slate-800 hover:bg-slate-900 shadow-lg transition-transform active:scale-95"
-                                >
-                                    Tutup
-                                </button>
-                            </>
-                        )}
-                    </div>
-                )}
+                            </div>
+                        </div>
+                    ))}
+                    
+                    {!isExam && (
+                        <button 
+                            onClick={() => handleSubmitQuiz(false)}
+                            className="w-full bg-indigo-600 text-white py-3 rounded-xl font-bold shadow-lg hover:bg-indigo-700"
+                        >
+                            Kirim Jawaban
+                        </button>
+                    )}
+                </div>
+            )}
+
+            {/* Footer Actions */}
+            <div className="mt-4 pt-4 border-t border-slate-100 flex items-center justify-between gap-2">
+                <button 
+                    onClick={() => setIsExpanded(!isExpanded)} 
+                    className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1"
+                >
+                    {isExpanded ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                    {isExpanded ? 'Tutup' : 'Selengkapnya'}
+                </button>
+                
+                <div className="flex gap-2">
+                    {module.fileUrl && (
+                        <a 
+                            href={module.fileUrl} 
+                            download={module.fileName || 'Materi'}
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            title="Download Materi"
+                        >
+                            <Download size={18}/>
+                        </a>
+                    )}
+                    {role === 'STUDENT' && (
+                        <button 
+                            onClick={() => setIsChatOpen(!isChatOpen)}
+                            className={`p-2 rounded-lg transition-colors ${isChatOpen ? 'bg-indigo-100 text-indigo-600' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                            title="Tanya AI"
+                        >
+                            <MessageSquare size={18}/>
+                        </button>
+                    )}
+                </div>
             </div>
         </div>
-    )}
-    </>
+
+        {/* AI Chat Drawer */}
+        {isChatOpen && (
+            <div className="bg-slate-50 border-t border-slate-200 h-80 flex flex-col animate-in slide-in-from-bottom-10">
+                <div className="p-3 bg-white border-b border-slate-100 flex justify-between items-center shadow-sm">
+                    <p className="text-xs font-bold text-indigo-600 flex items-center gap-1.5">
+                        <BrainCircuit size={14}/> Tutor AI
+                    </p>
+                    <button onClick={() => setIsChatOpen(false)} className="text-slate-400 hover:text-slate-600">
+                        <X size={16}/>
+                    </button>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                    {chatHistory.length === 0 && (
+                        <div className="text-center py-8 text-slate-400 text-xs">
+                            <p>Tanyakan apa saja tentang materi ini.</p>
+                        </div>
+                    )}
+                    {chatHistory.map((msg, i) => (
+                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] p-3 rounded-2xl text-xs ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none shadow-sm'}`}>
+                                {msg.text}
+                            </div>
+                        </div>
+                    ))}
+                    {isChatLoading && (
+                        <div className="flex justify-start">
+                            <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm">
+                                <Loader2 size={16} className="animate-spin text-indigo-600"/>
+                            </div>
+                        </div>
+                    )}
+                    <div ref={chatEndRef} />
+                </div>
+
+                <form onSubmit={handleAskAI} className="p-3 bg-white border-t border-slate-200 flex gap-2">
+                    <input 
+                        type="text" 
+                        value={chatInput}
+                        onChange={(e) => setChatInput(e.target.value)}
+                        placeholder="Ketik pertanyaan..."
+                        className="flex-1 text-xs p-2 rounded-lg border border-slate-300 focus:outline-none focus:border-indigo-500"
+                        disabled={isChatLoading}
+                    />
+                    <button 
+                        type="submit" 
+                        disabled={!chatInput.trim() || isChatLoading}
+                        className="bg-indigo-600 text-white p-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                        <Send size={16}/>
+                    </button>
+                </form>
+            </div>
+        )}
+    </div>
   );
 };
 
