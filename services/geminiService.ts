@@ -14,6 +14,9 @@ export const setGlobalApiKey = (key: string) => {
   dbApiKey = key;
 };
 
+// Helper for delay (backoff)
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
   let value = '';
@@ -279,27 +282,85 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
-    const parts: any[] = [];
-    if (files && files.length > 0) {
-      files.forEach(f => {
-        parts.push({
-            inlineData: {
-                mimeType: f.mimeType,
-                data: f.data
-            }
-        });
-      });
-    }
-    parts.push({ text: promptText });
+    // Internal helper to call API with retry capability
+    const generateWithRetry = async (useFiles: boolean) => {
+        const MAX_RETRIES = 3;
+        let lastError;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.5, 
-      }
-    });
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                const parts: any[] = [];
+                if (useFiles && files && files.length > 0) {
+                    files.forEach(f => {
+                        parts.push({
+                            inlineData: {
+                                mimeType: f.mimeType,
+                                data: f.data
+                            }
+                        });
+                    });
+                }
+                parts.push({ text: promptText });
+
+                return await ai.models.generateContent({
+                    model: MODEL_NAME,
+                    contents: { parts },
+                    config: {
+                        responseMimeType: "application/json",
+                        temperature: 0.5, 
+                    }
+                });
+            } catch (e: any) {
+                lastError = e;
+                const msg = e.message || '';
+                
+                // Check if error is related to Quota/Rate Limit
+                const isLimitError = msg.includes('429') || e.status === 429 || msg.includes('Quota') || msg.includes('Limit');
+                
+                if (isLimitError) {
+                    console.warn(`Attempt ${attempt + 1} failed due to limit.`);
+                    
+                    // If we used files and hit a limit, DO NOT retry with files. 
+                    // Fail immediately so we can fallback to text-only mode which is cheaper/faster.
+                    if (useFiles && files && files.length > 0) {
+                        throw e; 
+                    }
+                    
+                    // If text-only hit limit, wait longer and retry
+                    if (attempt < MAX_RETRIES - 1) {
+                         const delay = 3000 * (attempt + 1); // 3s, 6s, 9s
+                         console.log(`Waiting ${delay}ms before retry...`);
+                         await wait(delay);
+                    }
+                } else {
+                    // Other errors (network, parsing), wait briefly then retry
+                     if (attempt < MAX_RETRIES - 1) await wait(1500);
+                }
+            }
+        }
+        throw lastError;
+    };
+
+    let response;
+    
+    try {
+        // Attempt 1: Try with full context (files + text)
+        response = await generateWithRetry(true);
+    } catch (e) {
+        // Fallback: If failed (likely Limit Exceeded due to large files), try Text-Only
+        if (files && files.length > 0) {
+            console.log("⚠️ Limit reached or error with files. Switching to Text-Only mode (Lighter).");
+            try {
+                // Wait a bit before fallback request to let quota cool down slightly
+                await wait(2000);
+                response = await generateWithRetry(false);
+            } catch (fallbackError) {
+                throw fallbackError; // If text-only also fails, throw real error
+            }
+        } else {
+            throw e;
+        }
+    }
 
     let text = response.text;
     if (!text) {
@@ -326,7 +387,12 @@ export const generateQuizQuestions = async (
 
   } catch (error: any) {
     console.error("Error generating quiz:", error);
+    // Provide more descriptive error messages
     let msg = error.message || "Gagal menghubungi API Gemini.";
+    if (msg.includes('429') || msg.includes('Quota')) msg = "Kuota API sedang sibuk (Limit Exceeded). Sistem sudah mencoba otomatis namun gagal. Harap tunggu 1 menit lalu coba lagi.";
+    if (msg.includes('400') || msg.includes('403')) msg = "API Key tidak valid atau tidak memiliki akses. Cek konfigurasi.";
+    if (msg.includes('JSON')) msg = "Format jawaban AI tidak valid. Coba generate ulang.";
+    
     throw new Error(msg);
   }
 };
