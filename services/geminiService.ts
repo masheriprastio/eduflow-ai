@@ -112,7 +112,8 @@ export const generateQuizQuestions = async (
   contentContext: string, 
   type: 'MULTIPLE_CHOICE' | 'ESSAY', 
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
-  count: number
+  count: number,
+  files?: { mimeType: string; data: string }[]
 ): Promise<Question[] | null> => {
   const ai = getAiClient();
 
@@ -192,7 +193,7 @@ export const generateQuizQuestions = async (
         `;
     }
 
-    const prompt = `
+    const promptText = `
       Bertindaklah sebagai Guru Ahli Pembuat Soal Ujian.
       
       TOPIK UTAMA: "${title}"
@@ -201,7 +202,7 @@ export const generateQuizQuestions = async (
       "${contentContext}"
 
       INSTRUKSI:
-      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan BAHAN SUMBER di atas.
+      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan BAHAN SUMBER di atas (dan dokumen/gambar jika dilampirkan).
       
       PENTING:
       1. Jika Bahan Sumber sangat singkat, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}" untuk memperkaya soal, NAMUN tetap relevan.
@@ -213,9 +214,22 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
+    const parts: any[] = [];
+    if (files && files.length > 0) {
+      files.forEach(f => {
+        parts.push({
+            inlineData: {
+                mimeType: f.mimeType,
+                data: f.data
+            }
+        });
+      });
+    }
+    parts.push({ text: promptText });
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: prompt,
+      contents: { parts },
       config: {
         responseMimeType: "application/json",
         temperature: 0.5, // Lower temperature to be more deterministic/relevant

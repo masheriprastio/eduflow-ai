@@ -482,14 +482,17 @@ const App: React.FC = () => {
 
             {/* Auth State & Actions */}
             <div className="flex items-center gap-4">
-              {/* Settings Button (Always Visible) */}
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
-                title="Pengaturan API"
-              >
-                 <Settings size={20} />
-              </button>
+              
+              {/* Settings Button (Only Visible to Admin) */}
+              {role === 'ADMIN' && (
+                  <button 
+                    onClick={() => setIsSettingsOpen(true)}
+                    className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+                    title="Pengaturan API Key (Khusus Guru)"
+                  >
+                     <Settings size={20} />
+                  </button>
+              )}
 
               {role === 'GUEST' ? (
                  <button 
