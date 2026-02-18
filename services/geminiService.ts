@@ -1,7 +1,7 @@
 import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 
-const MODEL_NAME = 'gemini-1.5-flash'; // Updated to 1.5 Flash for better document handling
+const MODEL_NAME = 'gemini-3-flash-preview';
 
 // Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
@@ -105,15 +105,14 @@ export const generateModuleMetadata = async (title: string, contentSnippet: stri
 };
 
 /**
- * Generates Quiz Questions based on context AND attached files.
+ * Generates Quiz Questions based on context, type, difficulty and count.
  */
 export const generateQuizQuestions = async (
   title: string, 
   contentContext: string, 
   type: 'MULTIPLE_CHOICE' | 'ESSAY', 
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
-  count: number,
-  files?: { mimeType: string; data: string }[] // New Parameter for Files
+  count: number
 ): Promise<Question[] | null> => {
   const ai = getAiClient();
 
@@ -140,32 +139,31 @@ export const generateQuizQuestions = async (
     
     if (type === 'MULTIPLE_CHOICE') {
       formatInstruction = `
-        Format Output HARUS JSON Array murni:
+        Format JSON (Array of Objects):
         [
           {
             "id": "generate_unique_id_here",
             "type": "MULTIPLE_CHOICE",
-            "question": "Pertanyaan...",
-            "options": ["Opsi A", "Opsi B", "Opsi C", "Opsi D"],
-            "correctAnswer": "Opsi A"
+            "question": "Pertanyaan yang jelas dan spesifik?",
+            "options": ["Jawaban Benar", "Pengecoh Masuk Akal 1", "Pengecoh Masuk Akal 2", "Pengecoh Masuk Akal 3"],
+            "correctAnswer": "Jawaban Benar"
           }
         ]
-        
-        ATURAN KHUSUS PILIHAN GANDA:
-        1. "options" HARUS berisi 4 pilihan jawaban.
-        2. Opsi jawaban harus HOMOGEN (setara panjang dan jenis kalimatnya).
-        3. Pengecoh (jawaban salah) harus TERLIHAT MASUK AKAL bagi yang tidak paham materi, tapi JELAS SALAH bagi yang paham. JANGAN buat pengecoh konyol atau asal-asalan.
-        4. "correctAnswer" harus sama persis string-nya dengan salah satu di "options".
+        ATURAN OPSI JAWABAN:
+        1. "options" HARUS berisi 4 string.
+        2. Opsi jawaban harus HOMOGEN (sejenis) dan panjang kalimatnya seimbang.
+        3. Pengecoh (distractor) HARUS relevan dengan topik "${title}", jangan gunakan jawaban yang konyol atau jelas salah bagi orang awam.
+        4. Jangan gunakan "Semua Benar" atau "Semua Salah" kecuali sangat diperlukan.
       `;
     } else {
       formatInstruction = `
-        Format Output HARUS JSON Array murni:
+        Format JSON (Array of Objects):
         [
           {
             "id": "generate_unique_id_here",
             "type": "ESSAY",
-            "question": "Pertanyaan...",
-            "correctAnswer": "Poin-poin kunci jawaban yang diharapkan..."
+            "question": "Pertanyaan?",
+            "correctAnswer": "Rubrik penilaian/poin kunci jawaban."
           }
         ]
       `;
@@ -175,71 +173,52 @@ export const generateQuizQuestions = async (
     let difficultyPrompt = "";
     if (difficulty === 'HOTS') {
         difficultyPrompt = `
-        Tingkat Kesulitan: HOTS (High Order Thinking Skills).
-        - Soal harus menuntut ANALISIS, EVALUASI, atau KREASI.
-        - Hindari pertanyaan "Apa yang dimaksud dengan..." atau hapalan sederhana.
-        - Gunakan studi kasus singkat atau skenario jika memungkinkan.
+        LEVEL: SULIT / HOTS (Higher Order Thinking Skills).
+        - Soal harus berbasis ANALISIS kasus, EVALUASI data, atau MENYIMPULKAN.
+        - Hindari pertanyaan "Apa itu..." atau "Sebutkan...".
+        - Berikan konteks/skenario sebelum pertanyaan jika memungkinkan.
         `;
     } else if (difficulty === 'BASIC') {
         difficultyPrompt = `
-        Tingkat Kesulitan: DASAR (Basic Knowledge).
-        - Fokus pada pemahaman konsep, definisi, dan fakta penting dari materi.
-        - Bahasa lugas dan langsung.
+        LEVEL: MUDAH / BASIC.
+        - Fokus pada ingatan (recall) definisi, istilah, atau fakta dasar dari materi.
+        - Bahasa langsung dan mudah dipahami.
         `;
     } else {
         // MIX
         difficultyPrompt = `
-        Tingkat Kesulitan: CAMPURAN.
-        - Kombinasikan soal pemahaman dasar dan analisis.
+        LEVEL: CAMPURAN (Mixed).
+        - Buat variasi antara soal definisi dasar dan soal analisis.
         `;
     }
 
-    const promptText = `
-      Anda adalah Guru Profesional yang ahli membuat instrumen evaluasi pembelajaran yang valid dan reliabel.
+    const prompt = `
+      Bertindaklah sebagai Guru Ahli Pembuat Soal Ujian.
       
       TOPIK UTAMA: "${title}"
       
-      SUMBER REFERENSI:
+      BAHAN SUMBER (CONTEXT):
       "${contentContext}"
-      (Analisis dengan teliti teks di atas DAN file dokumen yang dilampirkan jika ada).
 
-      TUGAS:
-      Buatkan ${count} butir soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan materi tersebut.
-
-      KRITERIA KUALITAS:
-      1. **Relevansi Ketat**: Soal harus 100% berdasarkan materi yang diberikan/dilampirkan. Jangan membuat soal di luar konteks dokumen.
-      2. **Bahasa Natural**: Gunakan Bahasa Indonesia yang baku namun luwes (natural), seperti soal ujian sekolah standar nasional. Hindari bahasa terjemahan kaku.
-      3. **Konstruksi Soal**: Pokok soal (stem) harus jelas dan tidak bermakna ganda.
+      INSTRUKSI:
+      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan BAHAN SUMBER di atas.
       
+      PENTING:
+      1. Jika Bahan Sumber sangat singkat, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}" untuk memperkaya soal, NAMUN tetap relevan.
+      2. Jangan membuat soal yang jawabannya tidak bisa ditemukan atau disimpulkan dari logika topik tersebut.
+      3. Bahasa Indonesia formal dan akademis.
+
       ${difficultyPrompt}
 
       ${formatInstruction}
     `;
 
-    // Construct Payload with Files
-    const parts: any[] = [];
-    
-    // Add Files first (if any)
-    if (files && files.length > 0) {
-        files.forEach(f => {
-            parts.push({
-                inlineData: {
-                    mimeType: f.mimeType,
-                    data: f.data
-                }
-            });
-        });
-    }
-
-    // Add Text Prompt
-    parts.push({ text: promptText });
-
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
-      contents: { role: 'user', parts: parts }, // Correct structure for mixed content
+      contents: prompt,
       config: {
         responseMimeType: "application/json",
-        temperature: 0.3, // Lower temperature for stricter adherence to context
+        temperature: 0.5, // Lower temperature to be more deterministic/relevant
       }
     });
 
@@ -248,7 +227,7 @@ export const generateQuizQuestions = async (
     
     const parsedQuestions = JSON.parse(text);
 
-    // Post-process
+    // Post-process: Simple mapping without image generation logic
     const processedQuestions = parsedQuestions.map((q: any) => {
         return {
             id: q.id || `gen-${Date.now()}-${Math.random()}`,
@@ -273,9 +252,10 @@ export const generateQuizQuestions = async (
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
   const ai = getAiClient();
 
+  // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
     await mockDelay();
-    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi.`;
+    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi. Silakan masukkan API Key Anda di menu Pengaturan (ikon gerigi) di pojok kanan atas agar saya bisa menjawab dengan cerdas sesuai materi.`;
   }
 
   try {
@@ -295,6 +275,6 @@ export const askAboutModule = async (moduleTitle: string, moduleContext: string,
     return response.text;
   } catch (error) {
     console.error("Error asking Gemini:", error);
-    return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya.";
+    return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya (Mungkin API Key tidak valid atau kuota habis). Coba cek pengaturan key Anda.";
   }
 };
