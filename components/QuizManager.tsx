@@ -794,16 +794,20 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
 
                                             {/* Preview Image in List */}
                                             {q.imageUrl && (
-                                                <div className="mb-3 relative group/img">
+                                                <div className="mb-3 relative group/img bg-slate-100 rounded-lg flex items-center justify-center h-32 border border-slate-200 overflow-hidden">
                                                     <img 
                                                         src={q.imageUrl} 
                                                         alt="Visual Soal" 
-                                                        className="h-32 rounded-lg border border-slate-200 object-cover bg-slate-100"
+                                                        className="w-full h-full object-cover"
                                                         onError={(e) => {
                                                             (e.target as HTMLImageElement).style.display = 'none';
                                                             (e.target as HTMLImageElement).nextElementSibling?.classList.remove('hidden');
                                                         }}
                                                     />
+                                                    <div className="hidden flex flex-col items-center justify-center text-slate-400 p-4 text-center">
+                                                        <AlertCircle size={24} className="mb-1"/>
+                                                        <span className="text-[10px]">Gambar Error</span>
+                                                    </div>
                                                 </div>
                                             )}
 
