@@ -212,14 +212,23 @@ const App: React.FC = () => {
         if (!isSupabaseConfigured()) throw new Error("Offline Mode");
 
         const { id, ...insertData } = data as any;
-        const { error } = await supabase.from('modules').insert({
+        
+        // FIX: Added .select().single() to return the inserted data immediately
+        const { data: insertedModule, error } = await supabase.from('modules').insert({
             ...insertData,
             uploadDate: new Date().toISOString(),
             tags: data.tags || [],
             quiz: data.quiz || null
-        });
+        }).select().single();
 
         if (error) throw error;
+        
+        // FIX: Update local state IMMEDIATELY (Optimistic UI)
+        // This removes the dependency on Realtime subscription for list refresh
+        if (insertedModule) {
+            setModules(prev => [insertedModule, ...prev]);
+        }
+        
         setIsUploadOpen(false);
     } catch (e: any) {
         console.error("Error upload:", e);
@@ -255,8 +264,14 @@ const App: React.FC = () => {
     try {
         if (!isSupabaseConfigured()) throw new Error("Offline Mode");
         const { id, ...insertData } = student as any; 
-        const { error } = await supabase.from('students').insert(insertData);
+        
+        // Also use Optimistic Update for Students
+        const { data: newStudent, error } = await supabase.from('students').insert(insertData).select().single();
         if (error) throw error;
+        
+        if (newStudent) {
+            setStudents(prev => [newStudent, ...prev]);
+        }
     } catch (e: any) {
         setStudents(prev => [fallbackStudent, ...prev]);
         if (!e.message?.includes('Offline Mode')) console.error("Error add student:", e);
@@ -347,8 +362,13 @@ const App: React.FC = () => {
 
     try {
         if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const { error } = await supabase.from('results').insert(newResult);
+        const { data: insertedResult, error } = await supabase.from('results').insert(newResult).select().single();
         if (error) throw error;
+
+        // Optimistic update for results too
+        if (insertedResult) {
+            setQuizResults(prev => [insertedResult, ...prev]);
+        }
     } catch (e) {
         console.warn("Using offline mode for quiz result");
         setQuizResults(prev => [{...newResult, id: `local-res-${Date.now()}`} as QuizResult, ...prev]);
