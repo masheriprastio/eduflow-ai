@@ -464,8 +464,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                             onChange={(e) => setQuizType(e.target.value as 'PRACTICE' | 'EXAM')}
                                             className="p-2.5 text-sm border border-slate-300 rounded-lg focus:ring-2 focus:ring-indigo-500 outline-none bg-slate-50 w-full"
                                         >
-                                            <option value="PRACTICE">Latihan (Hasil Langsung Terbuka)</option>
-                                            <option value="EXAM">Ujian (Hasil Rahasia & Terjadwal)</option>
+                                            <option value="PRACTICE">Latihan Soal (Hasil Langsung Terbuka)</option>
+                                            <option value="EXAM">Ujian Harian (Hasil Rahasia & Terjadwal)</option>
                                         </select>
                                     </div>
                                     {/* Duration */}
@@ -527,10 +527,10 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                     <div className="flex-1">
                                         <h4 className="font-bold flex items-center gap-2 text-lg">
                                             <Sparkles size={18} className="text-yellow-300"/> 
-                                            Generator Soal AI (Multi-Sumber)
+                                            Generator Soal AI (Otomatis dari Dokumen)
                                         </h4>
                                         <p className="text-indigo-100 text-sm mt-1 mb-3">
-                                            Pilih materi sumber (Centang). Jika materi memiliki file PDF/Doc, AI akan membacanya.
+                                            Pilih modul di bawah ini. AI akan membaca <span className="font-bold text-white bg-white/20 px-1 rounded">Dokumen PDF/Word</span> yang Anda upload di modul tersebut untuk membuat soal.
                                         </p>
                                         
                                         {/* Source Selection */}
@@ -547,7 +547,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                                             onChange={() => toggleSourceModule(m.id)}
                                                             className="rounded text-indigo-600 focus:ring-0"
                                                         />
-                                                        <span className="truncate text-white">{m.title}</span>
+                                                        <span className="truncate text-white" title={m.title}>{m.title} {m.fileUrl ? '(Ada File)' : ''}</span>
                                                     </label>
                                                 ))}
                                             </div>
@@ -600,7 +600,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                             className="mt-1 bg-white text-indigo-600 px-3 py-2 rounded-lg text-xs font-bold shadow hover:bg-indigo-50 flex items-center justify-center gap-2"
                                         >
                                             {isGeneratingAi ? <Loader2 size={14} className="animate-spin"/> : <BrainCircuit size={14}/>}
-                                            Generate
+                                            Buat Soal
                                         </button>
                                     </div>
                                 </div>

@@ -81,6 +81,10 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
 
   const handleAskAI = async () => {
     if (!question.trim()) return;
+    if (role === 'GUEST') {
+        alert("Silakan Login terlebih dahulu untuk bertanya pada Tutor AI.");
+        return;
+    }
     
     const currentQ = question;
     setQuestion(''); // Clear input immediately
@@ -135,6 +139,10 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
   };
 
   const openQuizModal = () => {
+      if (role === 'GUEST') {
+          alert("Akses Ditolak: Anda harus Login sebagai Siswa untuk mengerjakan kuis/ujian.");
+          return;
+      }
       const schedule = checkSchedule();
       if (role === 'STUDENT' && schedule.status !== 'OPEN') {
           alert(schedule.message);
@@ -143,11 +151,28 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
       setIsQuizOpen(true);
   };
 
+  const handleDownload = (e: React.MouseEvent) => {
+      if (role === 'GUEST') {
+          e.preventDefault();
+          alert("Akses Ditolak: Anda harus Login untuk mengunduh materi.");
+          return;
+      }
+      if (!module.fileUrl) {
+          e.preventDefault();
+      }
+  };
+
   // --- QUIZ LOGIC ---
   
   const startExam = () => {
       if (!module.quiz) return;
       
+      if (role === 'GUEST') {
+          alert("Silakan Login terlebih dahulu.");
+          setIsQuizOpen(false);
+          return;
+      }
+
       // Double check schedule before starting
       const schedule = checkSchedule();
       if (role === 'STUDENT' && schedule.status !== 'OPEN') {
@@ -472,7 +497,7 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
                 href={module.fileUrl || '#'} 
                 download={module.fileName}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white transition-all shadow-md hover:shadow-lg ${!module.fileUrl ? 'bg-slate-300 cursor-not-allowed' : 'bg-indigo-600 hover:bg-indigo-700 shadow-indigo-200'}`}
-                onClick={(e) => !module.fileUrl && e.preventDefault()}
+                onClick={handleDownload}
                 >
                 <Download size={18} />
                 Unduh
