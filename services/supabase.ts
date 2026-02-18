@@ -50,21 +50,46 @@ export const uploadFile = async (file: File): Promise<string | null> => {
     if (!isKeyValid) return null;
 
     try {
+        // Sanitasi nama file agar aman di URL
         const fileExt = file.name.split('.').pop();
-        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const cleanName = file.name.replace(/[^a-zA-Z0-9]/g, '_').substring(0, 20);
+        const fileName = `${Date.now()}_${cleanName}.${fileExt}`;
         const filePath = `${fileName}`;
 
-        const { error: uploadError } = await supabase.storage
+        // Upload ke bucket 'materials'
+        const { data, error: uploadError } = await supabase.storage
             .from('materials')
-            .upload(filePath, file);
+            .upload(filePath, file, {
+                cacheControl: '3600',
+                upsert: false
+            });
 
         if (uploadError) {
-            console.error('Upload Error:', uploadError);
+            console.error('❌ Supabase Storage Error:', uploadError);
+            
+            // Deteksi Error Row Level Security (RLS) / Izin
+            if (uploadError.message.includes('row-level security') || (uploadError as any).statusCode === '403') {
+                alert(
+                    "⛔ Gagal Upload: IZIN DITOLAK (Policy Error).\n\n" +
+                    "Solusi: Buka Supabase > Storage > Policies.\n" +
+                    "Tambahkan Policy baru untuk operasi 'INSERT' dan pastikan role 'anon' dicentang."
+                );
+            } else {
+                alert(`Gagal Upload: ${uploadError.message}`);
+            }
+            
             throw uploadError;
         }
 
-        const { data } = supabase.storage.from('materials').getPublicUrl(filePath);
-        return data.publicUrl;
+        // Ambil Public URL
+        const { data: publicData } = supabase.storage.from('materials').getPublicUrl(filePath);
+        
+        if (!publicData || !publicData.publicUrl) {
+             console.error('❌ Failed to get public URL');
+             return null;
+        }
+
+        return publicData.publicUrl;
     } catch (error) {
         console.error("Supabase Upload Failed:", error);
         return null;
