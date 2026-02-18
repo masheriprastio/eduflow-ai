@@ -30,7 +30,8 @@ import {
   Clock,
   List,
   Bot,
-  User
+  User,
+  Archive
 } from 'lucide-react';
 
 interface ModuleCardProps {
@@ -138,9 +139,15 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
       return { status: 'OPEN' };
   };
 
+  const isPublished = module.quiz?.isPublished ?? false;
+
   const openQuizModal = () => {
       if (role === 'GUEST') {
           alert("Akses Ditolak: Anda harus Login sebagai Siswa untuk mengerjakan kuis/ujian.");
+          return;
+      }
+      if (role === 'STUDENT' && !isPublished) {
+          alert("Ujian ini belum dipublikasikan oleh guru.");
           return;
       }
       const schedule = checkSchedule();
@@ -445,13 +452,13 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
            <div className="flex flex-wrap gap-2 mt-3">
                {/* Quiz Indicator Badge */}
                {module.quiz && (
-                   <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100">
-                       <BrainCircuit size={14}/>
-                       {module.quiz.questions.length} Soal
+                   <div className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border ${isPublished ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 'bg-orange-50 text-orange-700 border-orange-100'}`}>
+                       {isPublished ? <BrainCircuit size={14}/> : <Archive size={14}/>}
+                       {isPublished ? `${module.quiz.questions.length} Soal` : 'Bank Soal / Draft'}
                    </div>
                )}
                {/* Duration Badge */}
-                {module.quiz?.duration ? (
+                {module.quiz?.duration && isPublished ? (
                    <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-bold border border-amber-100">
                        <Timer size={14}/>
                        {module.quiz.duration} Menit
@@ -459,7 +466,7 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
                 ) : null}
 
                {/* Schedule Badge */}
-               {renderScheduleBadge()}
+               {isPublished && renderScheduleBadge()}
 
                {/* Target Classes Badge */}
                {module.targetClasses && module.targetClasses.length > 0 && (
@@ -477,15 +484,19 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit,
                 {module.quiz && (
                     <button 
                         onClick={openQuizModal}
-                        disabled={role === 'STUDENT' && checkSchedule().status !== 'OPEN'}
+                        disabled={(role === 'STUDENT' && checkSchedule().status !== 'OPEN') || (role === 'STUDENT' && !isPublished)}
                         className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-bold text-white shadow-md transition-all ${
-                            role === 'STUDENT' && checkSchedule().status !== 'OPEN' 
+                            (role === 'STUDENT' && checkSchedule().status !== 'OPEN') || (role === 'STUDENT' && !isPublished)
                             ? 'bg-slate-400 cursor-not-allowed opacity-70' 
                             : 'bg-emerald-500 hover:bg-emerald-600 shadow-emerald-200 hover:scale-[1.02]'
                         }`}
                     >
-                        {role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? <Lock size={18} /> : <BrainCircuit size={18} />}
+                        {role === 'STUDENT' && !isPublished ? <Archive size={18}/> : 
+                         role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? <Lock size={18} /> : 
+                         <BrainCircuit size={18} />}
+                        
                         {
+                            role === 'STUDENT' && !isPublished ? 'Belum Rilis' :
                             role === 'STUDENT' && checkSchedule().status === 'NOT_STARTED' ? 'Belum Dibuka' :
                             role === 'STUDENT' && checkSchedule().status === 'EXPIRED' ? 'Ujian Ditutup' :
                             (module.quiz.quizType === 'EXAM' ? 'Kerjakan Ujian' : 'Mulai Latihan')

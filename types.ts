@@ -34,6 +34,7 @@ export interface Quiz {
   startDate?: string; // ISO Date String (When exam opens)
   endDate?: string;   // ISO Date String (Deadline)
   questions: Question[];
+  isPublished?: boolean; // NEW: If false, it's a Draft (Bank Soal) and hidden from students
 }
 
 export interface StudentAnswer {

@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { LearningModule, Question } from '../types';
 import { generateQuizQuestions } from '../services/geminiService';
-import { X, Save, Plus, Trash2, CheckCircle, HelpCircle, FileText, ChevronRight, BrainCircuit, AlertCircle, Sparkles, Loader2, ImageIcon, Pencil, Upload, Image as LucideImage, Clock, ChevronDown, PenTool, PlusCircle, Check, BookOpen, GraduationCap, Calendar, Layers, Settings, Info } from 'lucide-react';
+import { X, Save, Plus, Trash2, CheckCircle, HelpCircle, FileText, ChevronRight, BrainCircuit, AlertCircle, Sparkles, Loader2, ImageIcon, Pencil, Upload, Image as LucideImage, Clock, ChevronDown, PenTool, PlusCircle, Check, BookOpen, GraduationCap, Calendar, Layers, Settings, Info, Eye, Globe, Archive } from 'lucide-react';
 
 interface QuizManagerProps {
   isOpen: boolean;
@@ -19,6 +19,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   const [quizTitle, setQuizTitle] = useState('');
   const [quizDuration, setQuizDuration] = useState<number>(0); // 0 = No Limit
   const [quizType, setQuizType] = useState<'PRACTICE' | 'EXAM'>('PRACTICE');
+  const [isPublished, setIsPublished] = useState(false); // NEW: Draft vs Published
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
 
@@ -45,6 +46,10 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   const [tempSuccessMsg, setTempSuccessMsg] = useState<string | null>(null);
   const [questionToDelete, setQuestionToDelete] = useState<string | null>(null); // State for delete confirmation modal
 
+  // Preview State
+  const [isPreviewOpen, setIsPreviewOpen] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+
   // Mobile/Layout state
   const [showList, setShowList] = useState(true);
   
@@ -60,6 +65,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
             setQuizTitle(module.quiz?.title || `Kuis: ${module.title}`);
             setQuizDuration(module.quiz?.duration || 0);
             setQuizType(module.quiz?.quizType || 'PRACTICE');
+            setIsPublished(module.quiz?.isPublished ?? false); // Default to false if undefined for new edits
             setStartDate(module.quiz?.startDate || '');
             setEndDate(module.quiz?.endDate || '');
             
@@ -79,7 +85,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   };
 
   // Helper to sync changes to parent immediately
-  const saveToModule = (updatedQuestions: Question[]) => {
+  const saveToModule = (updatedQuestions: Question[], publishedStatus?: boolean) => {
     if (!selectedModuleId) return;
     const module = modules.find(m => m.id === selectedModuleId);
     if (!module) return;
@@ -92,7 +98,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
             quizType: quizType,
             startDate: startDate || undefined,
             endDate: endDate || undefined,
-            questions: updatedQuestions
+            questions: updatedQuestions,
+            isPublished: publishedStatus !== undefined ? publishedStatus : isPublished
         }
     };
 
@@ -322,6 +329,16 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
       if(fileInputRef.current) fileInputRef.current.value = '';
   };
 
+  // --- PREVIEW LOGIC ---
+  const handleOpenPreview = () => {
+      if (questions.length === 0) {
+          alert("Belum ada soal untuk dipreview.");
+          return;
+      }
+      setPreviewIndex(0);
+      setIsPreviewOpen(true);
+  };
+
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       
@@ -360,6 +377,83 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
         </div>
       )}
 
+      {/* --- PREVIEW MODAL --- */}
+      {isPreviewOpen && (
+          <div className="absolute inset-0 z-[120] bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4 animate-in fade-in">
+              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden">
+                  <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-indigo-50">
+                      <div>
+                          <h3 className="text-lg font-bold text-indigo-900 flex items-center gap-2">
+                              <Eye size={20}/> Preview Soal (Mode Guru)
+                          </h3>
+                          <p className="text-xs text-indigo-600">Melihat tampilan soal dan kunci jawaban.</p>
+                      </div>
+                      <button onClick={() => setIsPreviewOpen(false)} className="p-2 bg-white rounded-full text-slate-500 hover:text-slate-800 shadow-sm"><X size={20}/></button>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto p-6 bg-slate-50">
+                      {questions.length > 0 && (
+                          <div className="max-w-2xl mx-auto bg-white p-8 rounded-xl shadow-sm border border-slate-200">
+                              <div className="flex items-center justify-between mb-6">
+                                  <span className="bg-slate-800 text-white px-3 py-1 rounded-lg text-sm font-bold">Soal {previewIndex + 1} dari {questions.length}</span>
+                                  <span className="text-xs font-bold uppercase text-slate-400 border border-slate-200 px-2 py-1 rounded">
+                                      {questions[previewIndex].type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai'}
+                                  </span>
+                              </div>
+                              
+                              {questions[previewIndex].imageUrl && (
+                                  <div className="mb-6 rounded-xl overflow-hidden border border-slate-100 shadow-sm bg-slate-50">
+                                      <img src={questions[previewIndex].imageUrl} alt="Soal" className="max-w-full h-auto mx-auto max-h-[300px] object-contain"/>
+                                  </div>
+                              )}
+
+                              <p className="text-lg font-medium text-slate-800 mb-6 leading-relaxed">{questions[previewIndex].question}</p>
+
+                              {questions[previewIndex].type === 'MULTIPLE_CHOICE' ? (
+                                  <div className="space-y-3">
+                                      {questions[previewIndex].options?.map((opt, idx) => {
+                                          const isCorrect = opt === questions[previewIndex].correctAnswer;
+                                          return (
+                                              <div key={idx} className={`p-4 rounded-xl border-2 flex items-center gap-3 ${isCorrect ? 'border-green-500 bg-green-50' : 'border-slate-100 bg-white'}`}>
+                                                  <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center shrink-0 ${isCorrect ? 'border-green-600 bg-green-600 text-white' : 'border-slate-300'}`}>
+                                                      {isCorrect && <Check size={14}/>}
+                                                  </div>
+                                                  <span className={`flex-1 font-medium ${isCorrect ? 'text-green-800' : 'text-slate-600'}`}>{opt}</span>
+                                                  {isCorrect && <span className="text-xs font-bold text-green-600 uppercase tracking-wider">Kunci Jawaban</span>}
+                                              </div>
+                                          );
+                                      })}
+                                  </div>
+                              ) : (
+                                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl">
+                                      <p className="text-xs font-bold text-amber-700 uppercase mb-2">Kunci Jawaban / Referensi:</p>
+                                      <p className="text-amber-900">{questions[previewIndex].correctAnswer}</p>
+                                  </div>
+                              )}
+                          </div>
+                      )}
+                  </div>
+
+                  <div className="p-4 border-t border-slate-200 bg-white flex justify-between items-center">
+                      <button 
+                          onClick={() => setPreviewIndex(Math.max(0, previewIndex - 1))}
+                          disabled={previewIndex === 0}
+                          className="px-4 py-2 rounded-lg border border-slate-200 text-slate-600 disabled:opacity-50 hover:bg-slate-50 font-bold flex items-center gap-2"
+                      >
+                          <ChevronRight className="rotate-180" size={18}/> Sebelumnya
+                      </button>
+                      <button 
+                          onClick={() => setPreviewIndex(Math.min(questions.length - 1, previewIndex + 1))}
+                          disabled={previewIndex === questions.length - 1}
+                          className="px-4 py-2 rounded-lg bg-indigo-600 text-white disabled:opacity-50 hover:bg-indigo-700 font-bold flex items-center gap-2 shadow-lg"
+                      >
+                          Selanjutnya <ChevronRight size={18}/>
+                      </button>
+                  </div>
+              </div>
+          </div>
+      )}
+
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl flex flex-col h-[90vh] overflow-hidden">
         
         {/* Header */}
@@ -367,9 +461,9 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
           <div>
             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
                 <BrainCircuit className="text-indigo-600" size={24} />
-                Manajemen Bank Soal & Ujian
+                Bank Soal & Manajemen Ujian
             </h2>
-            <p className="text-sm text-slate-500">Kelola soal dari berbagai materi dan atur jadwal ujian.</p>
+            <p className="text-sm text-slate-500">Kelola kumpulan soal, simpan sebagai draft, atau publikasikan ujian.</p>
           </div>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-100 rounded-full">
             <X size={24} />
@@ -391,12 +485,23 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                             className={`w-full text-left p-3 rounded-lg text-sm transition-all border ${selectedModuleId === m.id ? 'bg-white border-indigo-500 shadow-md ring-1 ring-indigo-500' : 'bg-white border-slate-200 hover:border-indigo-300 hover:shadow-sm'}`}
                         >
                             <p className="font-bold text-slate-800 line-clamp-1">{m.title}</p>
-                            <div className="flex items-center gap-2 mt-1">
+                            <div className="flex flex-wrap items-center gap-2 mt-1">
                                 <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded">{m.category}</span>
                                 {m.quiz ? (
-                                    <span className="text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded flex items-center gap-1">
-                                        <CheckCircle size={10}/> {m.quiz.questions.length} Soal
-                                    </span>
+                                    <>
+                                        <span className="text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded flex items-center gap-1">
+                                            <CheckCircle size={10}/> {m.quiz.questions.length} Soal
+                                        </span>
+                                        {m.quiz.isPublished ? (
+                                            <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded flex items-center gap-1 font-bold">
+                                                <Globe size={10}/> Terbit
+                                            </span>
+                                        ) : (
+                                            <span className="text-[10px] bg-orange-100 text-orange-600 px-1.5 py-0.5 rounded flex items-center gap-1 font-bold">
+                                                <Archive size={10}/> Draft
+                                            </span>
+                                        )}
+                                    </>
                                 ) : (
                                     <span className="text-[10px] text-slate-400 italic">Belum ada kuis</span>
                                 )}
@@ -413,11 +518,11 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                         
                         {/* Editor Header (Fixed Title Only) */}
                         <div className="p-4 border-b border-slate-100 bg-white shrink-0">
-                            <div className="flex items-center gap-3">
-                                <button onClick={() => setShowList(true)} className="md:hidden p-2 -ml-2 text-slate-500">
+                            <div className="flex flex-col md:flex-row items-center gap-3">
+                                <button onClick={() => setShowList(true)} className="md:hidden p-2 -ml-2 text-slate-500 self-start">
                                     <ChevronRight className="rotate-180" size={20}/>
                                 </button>
-                                <div className="flex-1">
+                                <div className="flex-1 w-full">
                                     <label className="block text-xs font-bold text-slate-500 mb-1">Judul Kuis / Ujian</label>
                                     <input 
                                         type="text" 
@@ -427,20 +532,30 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                         placeholder="Masukkan Judul Kuis..."
                                     />
                                 </div>
-                                <button 
-                                    onClick={handleDeleteQuiz}
-                                    className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100 transition-colors mr-2"
-                                    title="Hapus Semua Soal & Data Kuis Ini"
-                                >
-                                    <Trash2 size={16}/> Hapus Data
-                                </button>
-                                <button 
-                                    id="save-quiz-btn"
-                                    onClick={handleSaveQuizGlobal}
-                                    className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
-                                >
-                                    <Save size={16}/> Simpan
-                                </button>
+                                <div className="flex items-center gap-2 mt-2 md:mt-0">
+                                    <button 
+                                        onClick={handleOpenPreview}
+                                        disabled={questions.length === 0}
+                                        className="bg-white border border-slate-200 text-slate-600 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-slate-50 transition-colors disabled:opacity-50"
+                                        title="Lihat Preview Soal"
+                                    >
+                                        <Eye size={16}/> Preview
+                                    </button>
+                                    <button 
+                                        onClick={handleDeleteQuiz}
+                                        className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100 transition-colors"
+                                        title="Hapus Semua Soal & Data Kuis Ini"
+                                    >
+                                        <Trash2 size={16}/> Hapus
+                                    </button>
+                                    <button 
+                                        id="save-quiz-btn"
+                                        onClick={handleSaveQuizGlobal}
+                                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-100"
+                                    >
+                                        <Save size={16}/> Simpan
+                                    </button>
+                                </div>
                             </div>
                         </div>
 
@@ -490,14 +605,48 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                     </div>
                                 </div>
 
-                                {/* Dates */}
+                                {/* Status & Dates */}
                                 <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
-                                    <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 flex items-center gap-1">
-                                        <Calendar size={12}/> Periode Akses Ujian (Jadwal Buka - Tutup)
-                                    </label>
-                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="flex flex-col md:flex-row gap-6 mb-4">
+                                        <div className="flex-1">
+                                            <label className="text-[10px] font-bold text-slate-500 uppercase mb-3 flex items-center gap-1">
+                                                <Globe size={12}/> Status Publikasi
+                                            </label>
+                                            <div className="flex items-center gap-4">
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input 
+                                                        type="radio" 
+                                                        name="status"
+                                                        checked={!isPublished}
+                                                        onChange={() => setIsPublished(false)}
+                                                        className="text-orange-500 focus:ring-orange-500"
+                                                    />
+                                                    <span className={`text-sm font-bold ${!isPublished ? 'text-orange-600' : 'text-slate-600'}`}>
+                                                        Draft / Bank Soal
+                                                    </span>
+                                                </label>
+                                                <label className="flex items-center gap-2 cursor-pointer">
+                                                    <input 
+                                                        type="radio" 
+                                                        name="status"
+                                                        checked={isPublished}
+                                                        onChange={() => setIsPublished(true)}
+                                                        className="text-blue-600 focus:ring-blue-600"
+                                                    />
+                                                    <span className={`text-sm font-bold ${isPublished ? 'text-blue-600' : 'text-slate-600'}`}>
+                                                        Terbit (Published)
+                                                    </span>
+                                                </label>
+                                            </div>
+                                            <p className="text-[10px] text-slate-400 mt-2">
+                                                *Mode Draft: Soal tersimpan di sistem tapi tidak muncul di halaman siswa.
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-200 pt-4">
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-slate-500 font-medium mb-1">Mulai Dibuka</span>
+                                            <span className="text-[10px] text-slate-500 font-medium mb-1">Mulai Dibuka (Opsional)</span>
                                             <input 
                                                 type="datetime-local" 
                                                 value={startDate}
@@ -506,7 +655,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                             />
                                         </div>
                                         <div className="flex flex-col">
-                                            <span className="text-[10px] text-slate-500 font-medium mb-1">Ditutup Otomatis</span>
+                                            <span className="text-[10px] text-slate-500 font-medium mb-1">Ditutup Otomatis (Opsional)</span>
                                             <input 
                                                 type="datetime-local" 
                                                 value={endDate}
@@ -515,9 +664,6 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                             />
                                         </div>
                                     </div>
-                                    <p className="text-[10px] text-orange-600 mt-2 flex items-center gap-1">
-                                        <AlertCircle size={10}/> Siswa hanya bisa menekan tombol "Mulai" di antara waktu ini.
-                                    </p>
                                 </div>
                             </div>
 
