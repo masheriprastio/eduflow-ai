@@ -1,5 +1,6 @@
 import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
+import { supabase } from "./supabase";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
@@ -32,23 +33,44 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 
 // Helper to get AI client safely inside functions
 // Returns NULL if no key is found (triggering Mock Mode)
-const getAiClient = (): GoogleGenAI | null => {
-  // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin)
+// NOW ASYNC to allow fetching from DB if cache is empty
+const getAiClient = async (): Promise<GoogleGenAI | null> => {
+  // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin - Cache In-Memory)
   let apiKey = dbApiKey || '';
 
-  // 2. Coba ambil dari Local Storage (Fallback input manual per device)
+  // 2. Jika Cache kosong, coba fetch langsung dari Supabase (System Settings)
+  // Ini penting agar Siswa (yang tidak punya localStorage key) bisa dapat key dari Admin
+  if (!apiKey) {
+      try {
+          const { data } = await supabase
+            .from('system_settings')
+            .select('value')
+            .eq('key', 'gemini_api_key')
+            .single();
+          
+          if (data && data.value) {
+              apiKey = data.value;
+              setGlobalApiKey(apiKey); // Update cache global
+              console.log("API Key fetched lazily from DB");
+          }
+      } catch (err) {
+          // Silent fail, will try next method
+      }
+  }
+
+  // 3. Coba ambil dari Local Storage (Fallback input manual per device)
   try {
       if (!apiKey && typeof window !== 'undefined') {
           apiKey = localStorage.getItem('USER_API_KEY') || '';
       }
   } catch (e) {}
 
-  // 3. Jika tidak ada, coba Environment Variables
+  // 4. Jika tidak ada, coba Environment Variables
   if (!apiKey) {
       apiKey = getEnv('VITE_API_KEY', 'REACT_APP_API_KEY') || getEnv('API_KEY');
   }
   
-  // 4. Validasi
+  // 5. Validasi
   if (!apiKey || apiKey === 'dummy-key') {
       console.warn("Gemini API Key missing! Using Mock Mode.");
       return null;
@@ -65,7 +87,7 @@ const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1500));
  * Generates a summary and tags for a learning module.
  */
 export const generateModuleMetadata = async (title: string, contentSnippet: string) => {
-  const ai = getAiClient();
+  const ai = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
@@ -124,7 +146,7 @@ export const generateQuizQuestions = async (
   count: number,
   files?: { mimeType: string; data: string }[]
 ): Promise<Question[] | null> => {
-  const ai = getAiClient();
+  const ai = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
@@ -273,7 +295,7 @@ export const generateQuizQuestions = async (
  * Allows a student to ask a question about a specific module.
  */
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
-  const ai = getAiClient();
+  const ai = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
