@@ -9,6 +9,7 @@ interface SettingsModalProps {
 
 // UUID Khusus untuk menyimpan konfigurasi (Karena kolom ID di DB bertipe UUID)
 const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
+const CONFIG_MODULE_TITLE = 'SYSTEM_CONFIG_DO_NOT_DELETE';
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
@@ -37,11 +38,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 
                 // Try fallback table if not found
                 if (!foundKey) {
-                     const { data: modData } = await supabase
+                     // Try ID
+                     let { data: modData } = await supabase
                         .from('modules')
                         .select('description')
                         .eq('id', CONFIG_MODULE_ID)
                         .single();
+                     
+                     // Try Title if ID failed (Fallback for legacy broken config)
+                     if (!modData) {
+                         const titleSearch = await supabase
+                            .from('modules')
+                            .select('description')
+                            .eq('title', CONFIG_MODULE_TITLE)
+                            .limit(1)
+                            .single();
+                         modData = titleSearch.data;
+                     }
+
                      if (modData && modData.description) foundKey = modData.description;
                 }
 
@@ -79,12 +93,24 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             } else {
                 console.warn("Table 'system_settings' missing. Falling back to 'modules' table storage.", error.message);
                 
-                // FALLBACK: Store in 'modules' table with a specific VALID UUID
+                // FALLBACK STRATEGY:
+                // Check if a config module already exists (by title) to avoid duplicates or ID constraint issues
+                // If exists, update IT. If not, insert NEW with fixed ID.
+                
+                const existing = await supabase
+                    .from('modules')
+                    .select('id')
+                    .eq('title', CONFIG_MODULE_TITLE)
+                    .limit(1)
+                    .single();
+                
+                const targetId = existing.data ? existing.data.id : CONFIG_MODULE_ID;
+
                 const { error: fallbackError } = await supabase
                     .from('modules')
                     .upsert({
-                        id: CONFIG_MODULE_ID,
-                        title: 'SYSTEM_CONFIG_DO_NOT_DELETE',
+                        id: targetId, // Use existing ID if found, otherwise preferred ID
+                        title: CONFIG_MODULE_TITLE,
                         description: trimmedKey,
                         category: 'System',
                         uploadDate: new Date().toISOString(),
@@ -124,7 +150,8 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         if (isSupabaseConfigured()) {
             // Delete from both potential locations
             await supabase.from('system_settings').delete().eq('key', 'gemini_api_key');
-            await supabase.from('modules').delete().eq('id', CONFIG_MODULE_ID);
+            // Delete by ID or Title to be thorough
+            await supabase.from('modules').delete().or(`id.eq.${CONFIG_MODULE_ID},title.eq.${CONFIG_MODULE_TITLE}`);
         }
 
         setApiKey('');

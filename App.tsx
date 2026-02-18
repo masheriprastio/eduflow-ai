@@ -35,6 +35,9 @@ import {
 import { supabase, isSupabaseConfigured } from './services/supabase';
 import { setGlobalApiKey } from './services/geminiService';
 
+const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
+const CONFIG_MODULE_TITLE = 'SYSTEM_CONFIG_DO_NOT_DELETE';
+
 const App: React.FC = () => {
   const [role, setRole] = useState<Role>('GUEST');
   const [currentUser, setCurrentUser] = useState<Student | any>(null); 
@@ -79,9 +82,19 @@ const App: React.FC = () => {
           const fetchSettings = async () => {
               if (!isSupabaseConfigured()) return;
               try {
-                  // Attempt to fetch API Key from 'modules' table using specific ID
+                  // Attempt to fetch API Key from 'modules' table using specific ID or Title
                   // We reuse the 'modules' table because 'system_settings' might not exist
-                  const { data, error } = await supabase.from('modules').select('description').eq('id', 'config_api_key').single();
+                  
+                  // Try explicit ID first
+                  let { data, error } = await supabase.from('modules').select('description').eq('id', CONFIG_MODULE_ID).single();
+                  
+                  // If not found by ID, try by Title (Fallback for auto-generated UUIDs)
+                  if (!data || error) {
+                      const titleResult = await supabase.from('modules').select('description').eq('title', CONFIG_MODULE_TITLE).limit(1).single();
+                      data = titleResult.data;
+                      error = titleResult.error;
+                  }
+
                   if (data && data.description) {
                       console.log("Global API Key loaded from database (Module Storage).");
                       setGlobalApiKey(data.description);
@@ -505,8 +518,8 @@ const App: React.FC = () => {
 
   const filteredModules = useMemo(() => {
     return modules.filter(m => {
-        // EXCLUDE SYSTEM CONFIG MODULE
-        if (m.id === 'config_api_key') return false;
+        // EXCLUDE SYSTEM CONFIG MODULE (STRICT CHECK)
+        if (m.id === CONFIG_MODULE_ID || m.title === CONFIG_MODULE_TITLE || m.tags?.includes('hidden')) return false;
 
         const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) 
                             || m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
