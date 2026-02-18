@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { LearningModule, Role, Question, StudentAnswer } from '../types';
 import { askAboutModule } from '../services/geminiService';
@@ -27,7 +28,9 @@ import {
   GraduationCap,
   CalendarClock,
   Clock,
-  List
+  List,
+  Bot,
+  User
 } from 'lucide-react';
 
 interface ModuleCardProps {
@@ -37,11 +40,20 @@ interface ModuleCardProps {
   onQuizSubmit?: (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations?: number, isDisqualified?: boolean) => void;
 }
 
+interface ChatMessage {
+    id: string;
+    role: 'user' | 'ai';
+    text: string;
+}
+
 const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizSubmit }) => {
   const [showAIHelp, setShowAIHelp] = useState(false);
   const [question, setQuestion] = useState('');
-  const [answer, setAnswer] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  
+  // Chat State
+  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Quiz State
   const [isQuizOpen, setIsQuizOpen] = useState(false);
@@ -61,12 +73,67 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [violationMsg, setViolationMsg] = useState<string | null>(null);
 
+  // Initialize Chat
+  useEffect(() => {
+      if (showAIHelp && chatHistory.length === 0) {
+          setChatHistory([
+              {
+                  id: 'intro',
+                  role: 'ai',
+                  text: `Halo! Saya Tutor AI untuk materi "${module.title}". Silakan tanyakan apa saja yang belum kamu pahami.`
+              }
+          ]);
+      }
+  }, [showAIHelp, module.title]);
+
+  // Auto-scroll chat
+  useEffect(() => {
+      chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory, showAIHelp, isLoading]);
+
   const handleAskAI = async () => {
     if (!question.trim()) return;
+    
+    const currentQ = question;
+    setQuestion(''); // Clear input immediately
+    
+    // Add User Message
+    const userMsg: ChatMessage = { 
+        id: Date.now().toString(), 
+        role: 'user', 
+        text: currentQ 
+    };
+    setChatHistory(prev => [...prev, userMsg]);
     setIsLoading(true);
-    const response = await askAboutModule(module.title, module.description + (module.aiSummary || ''), question);
-    setAnswer(response || 'Tidak ada respons.');
-    setIsLoading(false);
+
+    try {
+        const response = await askAboutModule(module.title, module.description + (module.aiSummary || ''), currentQ);
+        const aiMsg: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'ai',
+            text: response || 'Maaf, saya tidak dapat merespons saat ini.'
+        };
+        setChatHistory(prev => [...prev, aiMsg]);
+    } catch (error) {
+        const errorMsg: ChatMessage = {
+            id: (Date.now() + 1).toString(),
+            role: 'ai',
+            text: 'Terjadi kesalahan koneksi. Silakan coba lagi.'
+        };
+        setChatHistory(prev => [...prev, errorMsg]);
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const resetChat = () => {
+      setChatHistory([
+          {
+              id: Date.now().toString(),
+              role: 'ai',
+              text: `Halo! Saya Tutor AI untuk materi "${module.title}". Silakan tanyakan apa saja yang belum kamu pahami.`
+          }
+      ]);
   };
 
   // Check Schedule Validity
@@ -429,48 +496,93 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
         </div>
       </div>
 
-      {/* AI Chat Drawer */}
+      {/* AI Chat Drawer - CHAT UI */}
       {showAIHelp && (
-        <div className="bg-slate-50 border-t border-slate-200 p-4 animate-in slide-in-from-bottom-5 duration-300">
-          <div className="flex items-center justify-between mb-3">
-             <h4 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-               <Sparkles size={14} className="text-indigo-500"/> Tutor AI
+        <div className="bg-slate-50 border-t border-slate-200 flex flex-col h-96 animate-in slide-in-from-bottom-5 duration-300">
+          
+          {/* Header Chat */}
+          <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
+             <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+               <Sparkles size={16} className="text-indigo-500 fill-indigo-100"/> Tutor AI
              </h4>
-             <button onClick={() => setAnswer('')} className="text-xs text-slate-400 hover:text-indigo-600">Reset</button>
+             <button 
+                onClick={resetChat} 
+                className="text-xs font-bold text-slate-400 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+             >
+                Reset Chat
+             </button>
           </div>
           
-          {answer && (
-            <div className="mb-4 p-3 bg-white rounded-lg border border-indigo-100 text-sm text-slate-700 shadow-sm">
-              {answer}
-            </div>
-          )}
+          {/* Chat Messages Area */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 scrollbar-thin">
+             {chatHistory.map((msg) => (
+                 <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                     
+                     {/* Avatar */}
+                     <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
+                         msg.role === 'user' 
+                         ? 'bg-indigo-600 text-white' 
+                         : 'bg-white border border-slate-200 text-indigo-600'
+                     }`}>
+                         {msg.role === 'user' ? <User size={16}/> : <Bot size={16}/>}
+                     </div>
 
-          <div className="relative">
-            <input 
-              type="text" 
-              value={question}
-              onChange={(e) => setQuestion(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleAskAI()}
-              placeholder="Tanya tentang materi ini..."
-              className="w-full pl-3 pr-10 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-            />
-            <button 
-              onClick={handleAskAI}
-              disabled={isLoading}
-              className="absolute right-2 top-1/2 -translate-y-1/2 text-indigo-500 hover:text-indigo-700 disabled:opacity-50"
-            >
-              {isLoading ? (
-                <div className="animate-spin h-4 w-4 border-2 border-indigo-500 border-t-transparent rounded-full"></div>
-              ) : (
-                <Send size={16} />
-              )}
-            </button>
+                     {/* Bubble */}
+                     <div className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap ${
+                         msg.role === 'user' 
+                         ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none' 
+                         : 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-none'
+                     }`}>
+                         {msg.text}
+                     </div>
+                 </div>
+             ))}
+
+             {/* Loading Bubble */}
+             {isLoading && (
+                 <div className="flex gap-3">
+                     <div className="w-8 h-8 rounded-full bg-white border border-slate-200 text-indigo-600 flex items-center justify-center shrink-0 shadow-sm">
+                         <Bot size={16}/>
+                     </div>
+                     <div className="bg-white border border-slate-200 px-4 py-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-1.5 w-fit">
+                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
+                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div>
+                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div>
+                     </div>
+                 </div>
+             )}
+             
+             {/* Invisible anchor for scrolling */}
+             <div ref={chatEndRef} />
+          </div>
+
+          {/* Input Area */}
+          <div className="p-3 bg-white border-t border-slate-200 shrink-0">
+            <div className="relative flex items-center gap-2">
+                <input 
+                  type="text" 
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAskAI()}
+                  placeholder="Ketik pertanyaanmu di sini..."
+                  className="w-full pl-4 pr-12 py-3 text-sm bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all shadow-inner"
+                  disabled={isLoading}
+                />
+                <button 
+                  onClick={handleAskAI}
+                  disabled={isLoading || !question.trim()}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:hover:bg-indigo-600 transition-colors shadow-md"
+                >
+                  <Send size={16} />
+                </button>
+            </div>
           </div>
         </div>
       )}
     </div>
 
     {/* QUIZ MODAL OVERLAY */}
+    {/* ... (Existing Quiz Modal Code - unchanged) ... */}
     {isQuizOpen && module.quiz && (
         <div className="fixed inset-0 z-[100] bg-slate-900/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
             {/* VIOLATION TOAST */}
