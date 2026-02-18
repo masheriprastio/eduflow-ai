@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
+import { supabase, isSupabaseConfigured } from './services/supabase';
 import { Role, LearningModule, ModuleCategory, Student, QuizResult, StudentAnswer, ManualGrade, ClassGroup } from './types';
 import ModuleCard from './components/ModuleCard';
 import UploadModal from './components/UploadModal';
@@ -7,7 +8,6 @@ import StudentManager from './components/StudentManager';
 import QuizManager from './components/QuizManager';
 import ReportsDashboard from './components/ReportsDashboard';
 import ChangePasswordModal from './components/ChangePasswordModal';
-import SettingsModal from './components/SettingsModal';
 import { 
   GraduationCap, 
   PlusCircle, 
@@ -26,102 +26,35 @@ import {
   ArrowRight,
   Trash2,
   Database,
-  Loader2,
   WifiOff,
   Settings
 } from 'lucide-react';
 
-// --- SUPABASE IMPORTS ---
-import { supabase, isSupabaseConfigured } from './services/supabase';
-
 const App: React.FC = () => {
   const [role, setRole] = useState<Role>('GUEST');
-  const [currentUser, setCurrentUser] = useState<Student | any>(null); 
-  const [isLoadingData, setIsLoadingData] = useState(true);
-  
-  // --- REAL-TIME DATABASE STATE ---
+  const [currentUser, setCurrentUser] = useState<Student | any>(null);
+  const [isLoadingData, setIsLoadingData] = useState(false);
+  const [isDbConnected, setIsDbConnected] = useState(isSupabaseConfigured());
+
+  // Data State (Fetched from DB)
   const [classes, setClasses] = useState<ClassGroup[]>([]);
   const [modules, setModules] = useState<LearningModule[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
   const [quizResults, setQuizResults] = useState<QuizResult[]>([]);
   const [manualGrades, setManualGrades] = useState<ManualGrade[]>([]);
-  
-  // --- SUPABASE DATA FETCHING & LISTENERS ---
-  
-  const fetchAllData = async () => {
-      // Helper to fetch data safely
-      const fetchTable = async (table: string, setter: React.Dispatch<React.SetStateAction<any[]>>, orderBy = 'created_at') => {
-          if (!isSupabaseConfigured()) return; // Skip fetch if not configured
-          const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false });
-          if (error) console.error(`Error fetching ${table}:`, error);
-          else setter(data || []);
-      };
 
-      await Promise.all([
-          fetchTable('classes', setClasses),
-          fetchTable('modules', setModules, 'uploadDate'), // Order by uploadDate
-          fetchTable('students', setStudents),
-          fetchTable('results', setQuizResults, 'submittedAt'),
-          fetchTable('grades', setManualGrades, 'date')
-      ]);
-      
-      setIsLoadingData(false);
-  };
-
-  useEffect(() => {
-    // 1. Initial Fetch
-    fetchAllData();
-
-    // 2. Setup Realtime Subscription (Only if configured)
-    if (isSupabaseConfigured()) {
-        const channel = supabase.channel('public-db-changes')
-            .on(
-                'postgres_changes', 
-                { event: '*', schema: 'public' }, 
-                (payload) => {
-                    const table = payload.table;
-                    console.log('Change detected in:', table);
-                    
-                    if (table === 'classes') {
-                        supabase.from('classes').select('*').order('created_at', { ascending: false })
-                            .then(({data}) => setClasses(data || []));
-                    } else if (table === 'modules') {
-                        supabase.from('modules').select('*').order('uploadDate', { ascending: false })
-                            .then(({data}) => setModules(data || []));
-                    } else if (table === 'students') {
-                        supabase.from('students').select('*').order('created_at', { ascending: false })
-                            .then(({data}) => setStudents(data || []));
-                    } else if (table === 'results') {
-                        supabase.from('results').select('*').order('submittedAt', { ascending: false })
-                            .then(({data}) => setQuizResults(data || []));
-                    } else if (table === 'grades') {
-                        supabase.from('grades').select('*').order('date', { ascending: false })
-                            .then(({data}) => setManualGrades(data || []));
-                    }
-                }
-            )
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
-    }
-  }, []);
-
-
-  // View State: 'MODULES' (Materi) or 'EXAMS' (Ujian Harian)
+  // View State
   const [activeView, setActiveView] = useState<'MODULES' | 'EXAMS'>('MODULES');
   
   // Modal States
   const [isUploadOpen, setIsUploadOpen] = useState(false);
-  const [uploadTargetClass, setUploadTargetClass] = useState<string | undefined>(undefined); // New state for pre-selected class
+  const [uploadTargetClass, setUploadTargetClass] = useState<string | undefined>(undefined);
   
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isStudentManagerOpen, setIsStudentManagerOpen] = useState(false);
   const [isQuizManagerOpen, setIsQuizManagerOpen] = useState(false);
   const [isReportsOpen, setIsReportsOpen] = useState(false);
   const [isChangePassOpen, setIsChangePassOpen] = useState(false);
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
   // Dropdown Menu State
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
@@ -140,31 +73,58 @@ const App: React.FC = () => {
   // Derive available classes names for UploadModal
   const classNames = useMemo(() => classes.map(c => c.name).sort(), [classes]);
 
+  // --- SUPABASE DATA FETCHING ---
+  const fetchAllData = async () => {
+      if (!isDbConnected) return;
+      setIsLoadingData(true);
+      try {
+          const { data: mods } = await supabase.from('modules').select('*').order('uploadDate', { ascending: false });
+          if(mods) setModules(mods as any);
+
+          const { data: stus } = await supabase.from('students').select('*').order('name');
+          if(stus) setStudents(stus as any);
+
+          const { data: clss } = await supabase.from('classes').select('*');
+          if(clss) setClasses(clss as any);
+          
+          const { data: ress } = await supabase.from('quiz_results').select('*').order('submittedAt', { ascending: false });
+          if(ress) setQuizResults(ress as any);
+
+          const { data: grds } = await supabase.from('grades').select('*').order('date', { ascending: false });
+          if(grds) setManualGrades(grds as any);
+
+      } catch (error) {
+          console.error("Error fetching data:", error);
+      } finally {
+          setIsLoadingData(false);
+      }
+  };
+
+  useEffect(() => {
+      fetchAllData();
+  }, [isDbConnected]);
+
+  // --- AUTH HANDLERS ---
+
   const handleLogin = (newRole: Role, user: any) => {
     if (newRole === 'STUDENT') {
-        const freshStudentData = students.find(s => s.nis === user.nis);
-        if (freshStudentData?.needsPasswordChange) {
-            setCurrentUser(freshStudentData);
+        // Cek perlu ganti password
+        if (user.needsPasswordChange) {
+            setCurrentUser(user);
             setIsLoginOpen(false);
             setIsChangePassOpen(true);
             return;
         }
-    }
-
-    setRole(newRole);
-    
-    // Update Student Activity if Role is Student (Fire and forget)
-    if (newRole === 'STUDENT' && user.id && isSupabaseConfigured()) { 
-       const simulatedIP = `192.168.1.${Math.floor(Math.random() * 255)}`;
-       const now = new Date().toISOString();
-       supabase.from('students').update({ lastLogin: now, ipAddress: simulatedIP }).eq('id', user.id).then(({ error }) => {
-           if (error) console.error("Failed to update login activity", error);
-       });
-       setCurrentUser({ ...user, lastLogin: now, ipAddress: simulatedIP });
+        
+        // Update last login di DB
+        const now = new Date().toISOString();
+        supabase.from('students').update({ lastLogin: now }).eq('nis', user.nis).then();
+        
+        setCurrentUser({ ...user, lastLogin: now });
     } else {
         setCurrentUser(user);
     }
-    
+    setRole(newRole);
     setIsLoginOpen(false);
   };
 
@@ -176,73 +136,59 @@ const App: React.FC = () => {
   };
 
   const handleChangePassword = async (newPass: string) => {
-      if (!currentUser || !currentUser.id) return;
-      
-      if (isSupabaseConfigured()) {
-        const { error } = await supabase.from('students').update({
-            password: newPass,
-            needsPasswordChange: false
-        }).eq('id', currentUser.id);
+      if (!currentUser) return;
+      try {
+          const { error } = await supabase
+            .from('students')
+            .update({ password: newPass, needsPasswordChange: false })
+            .eq('nis', currentUser.nis);
 
-        if (error) {
-            alert("Gagal mengubah password: " + error.message);
-            return;
-        }
+          if (error) throw error;
+
+          const updatedUser = { ...currentUser, password: newPass, needsPasswordChange: false };
+          setCurrentUser(updatedUser);
+          setIsChangePassOpen(false);
+          alert("Password berhasil diubah!");
+          handleLogin('STUDENT', updatedUser);
+      } catch (err) {
+          alert("Gagal mengubah password.");
       }
-      
-      alert("Password berhasil diubah!");
-      const updatedUser = { ...currentUser, password: newPass, needsPasswordChange: false };
-      setCurrentUser(updatedUser);
-      setIsChangePassOpen(false);
-      handleLogin('STUDENT', updatedUser);
   };
 
-  // --- CRUD HANDLERS WITH OFFLINE FALLBACK ---
+  // --- CRUD HANDLERS (Supabase) ---
 
   const handleUpload = async (data: Partial<LearningModule>) => {
-    const fallbackModule = { 
+    // Optimistic Update handled by fetch or pushing to state
+    const newModule = { 
         ...data, 
-        id: `local-${Date.now()}`, 
+        id: `mod-${Date.now()}`, // Temporary ID, Supabase usually generates UUID
         uploadDate: new Date().toISOString(), 
         tags: data.tags || [],
-        quiz: data.quiz || undefined
-    } as LearningModule;
+        quiz: data.quiz || null
+    };
 
-    try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-
-        const { id, ...insertData } = data as any;
-        const { error } = await supabase.from('modules').insert({
-            ...insertData,
-            uploadDate: new Date().toISOString(),
-            tags: data.tags || [],
-            quiz: data.quiz || null
-        });
-
-        if (error) throw error;
+    // Remove ID if Supabase auto-generates it, otherwise keep it
+    const { data: inserted, error } = await supabase.from('modules').insert(newModule).select().single();
+    
+    if (!error && inserted) {
+        setModules(prev => [inserted as any, ...prev]);
         setIsUploadOpen(false);
-    } catch (e: any) {
-        console.error("Error upload:", e);
-        // Fallback for demo
-        if (!isSupabaseConfigured() || e.message?.includes('Invalid API key') || e.message?.includes('Offline Mode')) {
-             alert("⚠️ Mode Demo (Offline): Data disimpan sementara di browser.");
-             setModules(prev => [fallbackModule, ...prev]);
-             setIsUploadOpen(false);
-        } else {
-             alert("Gagal mengunggah ke database: " + e.message);
-        }
+    } else {
+        alert("Gagal mengunggah materi ke database.");
+        console.error(error);
     }
   };
 
   const handleUpdateModule = async (updatedModule: LearningModule) => {
-    try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const { id, ...updateData } = updatedModule;
-        const { error } = await supabase.from('modules').update(updateData).eq('id', id);
-        if (error) throw error;
-    } catch (e) {
-        // Local Update
+    const { error } = await supabase
+        .from('modules')
+        .update(updatedModule)
+        .eq('id', updatedModule.id);
+
+    if (!error) {
         setModules(prev => prev.map(m => m.id === updatedModule.id ? updatedModule : m));
+    } else {
+        alert("Gagal memperbarui modul.");
     }
   };
 
@@ -251,81 +197,64 @@ const App: React.FC = () => {
   };
 
   const handleAddStudent = async (student: Student) => {
-    const fallbackStudent = { ...student, id: `local-${Date.now()}` };
-    try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const { id, ...insertData } = student as any; 
-        const { error } = await supabase.from('students').insert(insertData);
-        if (error) throw error;
-    } catch (e: any) {
-        setStudents(prev => [fallbackStudent, ...prev]);
-        if (!e.message?.includes('Offline Mode')) console.error("Error add student:", e);
+    const { data: inserted, error } = await supabase.from('students').insert(student).select().single();
+    if (!error && inserted) {
+        setStudents(prev => [inserted as any, ...prev]);
+    } else {
+        alert("Gagal menambah siswa. NIS mungkin duplikat.");
     }
   };
   
   const handleImportStudents = async (newStudents: Student[]) => {
-      try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const studentsToInsert = newStudents.map(s => ({
-            nis: s.nis, name: s.name, classes: s.classes, password: s.password, needsPasswordChange: true
-        }));
-        const { error } = await supabase.from('students').insert(studentsToInsert);
-        if (error) throw error;
-        alert("Berhasil import siswa!");
-      } catch (e) {
-          const localStudents = newStudents.map(s => ({...s, id: `local-${Math.random()}`, needsPasswordChange: true}));
-          setStudents(prev => [...localStudents, ...prev]);
-          alert("Mode Demo: " + newStudents.length + " siswa diimpor ke memori browser.");
+      const { data: inserted, error } = await supabase.from('students').insert(newStudents).select();
+      if (!error && inserted) {
+          setStudents(prev => [...(inserted as any), ...prev]);
+          alert(`Berhasil mengimpor ${inserted.length} siswa ke database.`);
+      } else {
+          alert("Gagal impor. Cek duplikasi NIS.");
       }
   };
 
   const handleUpdateStudent = async (updatedStudent: Student) => {
-      try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const sId = (updatedStudent as any).id;
-        if (sId && !sId.startsWith('local-')) {
-            const { id, ...data } = updatedStudent as any;
-            await supabase.from('students').update(data).eq('id', sId);
-        } else {
-             throw new Error("Local student");
-        }
-      } catch (e) {
-         setStudents(prev => prev.map(s => s.nis === updatedStudent.nis ? updatedStudent : s));
+      const { error } = await supabase.from('students').update(updatedStudent).eq('nis', updatedStudent.nis);
+      if (!error) {
+          setStudents(prev => prev.map(s => s.nis === updatedStudent.nis ? updatedStudent : s));
       }
   };
 
   const handleDeleteStudent = (nis: string) => {
-    const student = students.find(s => s.nis === nis);
-    if (student) {
-        setDeleteConfirmation({ isOpen: true, type: 'STUDENT', id: (student as any).id || nis, details: `NIS: ${nis}` });
-    }
+    setDeleteConfirmation({ isOpen: true, type: 'STUDENT', id: nis, details: `NIS: ${nis}` });
   };
 
   const handleUpdateClasses = async (updatedClasses: ClassGroup[]) => {
-     if (isSupabaseConfigured()) {
-         // Logic sync DB omitted for brevity, fallback to local state update only for stability in demo
-         // In real implementation, strict sync logic is needed.
-         // Here we just accept the new state for simplicity.
-     }
-     setClasses(updatedClasses);
+     // Simple strategy: Replace local state and let user sync manually or handle granularly
+     // For this app, we probably just add/remove classes one by one in the manager
+     // But `StudentManager` passes the whole array. 
+     // Let's implement full sync (delete not in list, upsert in list) is hard.
+     // Simplified: We assume `updatedClasses` contains the NEW state.
+     
+     // Note: Real apps usually have addClass/removeClass functions. 
+     // We will trust the StudentManager calls specific create/delete logic 
+     // but here it passes array. Let's just update local state and fetch in Manager.
+     // *Correction*: StudentManager calls `onUpdateClasses` with new array.
+     // Ideally we refactor StudentManager to call `addClass` / `deleteClass`.
+     // For now, let's just refresh.
+     setClasses(updatedClasses); // Optimistic
+     
+     // In a real scenario, StudentManager should call DB directly. 
+     // We will implement `addClass` and `deleteClass` logic inside StudentManager 
+     // and pass those as props instead of this generic one.
+     // *See StudentManager props below*
   };
 
-  // Actual Delete Logic
   const executeDelete = async () => {
       const id = deleteConfirmation.id;
       if (deleteConfirmation.type === 'MODULE') {
-          if (isSupabaseConfigured() && !id.startsWith('local-')) {
-             await supabase.from('modules').delete().eq('id', id);
-          }
-          setModules(prev => prev.filter(m => m.id !== id));
+          const { error } = await supabase.from('modules').delete().eq('id', id);
+          if (!error) setModules(prev => prev.filter(m => m.id !== id));
       } else if (deleteConfirmation.type === 'STUDENT') {
-          if (isSupabaseConfigured() && !id.startsWith('local-')) {
-             await supabase.from('students').delete().eq('id', id);
-          } else {
-             // Fallback delete by ID or find by logic if ID matches NIS passed in handle
-             // Since we passed ID or NIS, and local IDs are random strings
-             setStudents(prev => prev.filter(s => (s as any).id !== id && s.nis !== id));
-          }
+          const { error } = await supabase.from('students').delete().eq('nis', id);
+          if (!error) setStudents(prev => prev.filter(s => s.nis !== id));
       }
       setDeleteConfirmation({ ...deleteConfirmation, isOpen: false });
   };
@@ -334,6 +263,7 @@ const App: React.FC = () => {
     if (!currentUser) return;
 
     const newResult = {
+        id: `res-${Date.now()}`,
         studentName: currentUser.name,
         studentNis: currentUser.nis,
         moduleTitle: modules.find(m => m.id === moduleId)?.title || 'Unknown Module',
@@ -345,52 +275,35 @@ const App: React.FC = () => {
         isDisqualified: isDisqualified
     };
 
-    try {
-        if (!isSupabaseConfigured()) throw new Error("Offline Mode");
-        const { error } = await supabase.from('results').insert(newResult);
-        if (error) throw error;
-    } catch (e) {
-        console.warn("Using offline mode for quiz result");
-        setQuizResults(prev => [{...newResult, id: `local-res-${Date.now()}`} as QuizResult, ...prev]);
+    const { data: inserted, error } = await supabase.from('quiz_results').insert(newResult).select().single();
+    if (!error && inserted) {
+        setQuizResults(prev => [inserted as any, ...prev]);
     }
   };
 
   const handleResetExam = async (resultId: string) => {
-      if (isSupabaseConfigured() && !resultId.startsWith('local-')) {
-        await supabase.from('results').delete().eq('id', resultId);
-      }
-      setQuizResults(prev => prev.filter(r => r.id !== resultId));
+      const { error } = await supabase.from('quiz_results').delete().eq('id', resultId);
+      if(!error) setQuizResults(prev => prev.filter(r => r.id !== resultId));
   };
 
   const handleUpdateQuizResult = async (updatedResult: QuizResult) => {
-     if (isSupabaseConfigured() && !updatedResult.id.startsWith('local-')) {
-        const { id, ...data } = updatedResult;
-        await supabase.from('results').update(data).eq('id', id);
-     }
-     setQuizResults(prev => prev.map(r => r.id === updatedResult.id ? updatedResult : r));
+     const { error } = await supabase.from('quiz_results').update(updatedResult).eq('id', updatedResult.id);
+     if(!error) setQuizResults(prev => prev.map(r => r.id === updatedResult.id ? updatedResult : r));
   };
 
   const handleAddManualGrade = async (grade: ManualGrade) => {
-      if (isSupabaseConfigured()) {
-         const { id, ...data } = grade as any;
-         await supabase.from('grades').insert(data);
-      }
-      setManualGrades(prev => [grade, ...prev]);
+      const { data: inserted, error } = await supabase.from('grades').insert(grade).select().single();
+      if(!error && inserted) setManualGrades(prev => [inserted as any, ...prev]);
   };
 
   const handleUpdateManualGrade = async (updatedGrade: ManualGrade) => {
-    if (isSupabaseConfigured() && !updatedGrade.id.startsWith('local-')) {
-        const { id, ...data } = updatedGrade;
-        await supabase.from('grades').update(data).eq('id', id);
-    }
-    setManualGrades(prev => prev.map(g => g.id === updatedGrade.id ? updatedGrade : g));
+    const { error } = await supabase.from('grades').update(updatedGrade).eq('id', updatedGrade.id);
+    if(!error) setManualGrades(prev => prev.map(g => g.id === updatedGrade.id ? updatedGrade : g));
   };
 
   const handleDeleteManualGrade = async (id: string) => {
-    if (isSupabaseConfigured() && !id.startsWith('local-')) {
-        await supabase.from('grades').delete().eq('id', id);
-    }
-    setManualGrades(prev => prev.filter(g => g.id !== id));
+    const { error } = await supabase.from('grades').delete().eq('id', id);
+    if(!error) setManualGrades(prev => prev.filter(g => g.id !== id));
   };
 
   const getStudentResult = (moduleTitle: string) => {
@@ -400,7 +313,6 @@ const App: React.FC = () => {
         .sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime())[0];
   };
 
-  // Function to open upload modal with a specific target class
   const handleOpenUploadForClass = (className: string) => {
       setUploadTargetClass(className);
       setIsUploadOpen(true);
@@ -436,15 +348,6 @@ const App: React.FC = () => {
         ? `${currentUser.classes.length} Kelas Terdaftar`
         : `Kelas ${currentUser.classes[0]}`;
   };
-
-  if (isLoadingData) {
-      return (
-          <div className="min-h-screen flex items-center justify-center bg-slate-50 flex-col gap-4">
-              <Loader2 className="animate-spin text-indigo-600" size={48} />
-              <p className="text-slate-500 font-medium">Memuat Aplikasi...</p>
-          </div>
-      );
-  }
 
   return (
     <div className="min-h-screen flex flex-col font-sans text-slate-800 bg-slate-50/50">
@@ -482,15 +385,7 @@ const App: React.FC = () => {
 
             {/* Auth State & Actions */}
             <div className="flex items-center gap-4">
-              {/* Settings Button (Always Visible) */}
-              <button 
-                onClick={() => setIsSettingsOpen(true)}
-                className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
-                title="Pengaturan API"
-              >
-                 <Settings size={20} />
-              </button>
-
+              
               {role === 'GUEST' ? (
                  <button 
                     onClick={() => setIsLoginOpen(true)}
@@ -564,22 +459,30 @@ const App: React.FC = () => {
                                         <p className="text-xs text-slate-500 truncate mt-0.5">
                                           {getProfileClassText()}
                                         </p>
-                                        {/* Database Indicator */}
-                                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] px-2 py-1 rounded border w-fit ${isSupabaseConfigured() ? 'text-emerald-600 bg-emerald-50 border-emerald-100' : 'text-orange-600 bg-orange-50 border-orange-100'}`}>
-                                            {isSupabaseConfigured() ? (
-                                                <><Database size={10} /> Online Mode</>
-                                            ) : (
-                                                <><WifiOff size={10} /> Demo (Offline)</>
-                                            )}
+                                        {/* Storage Indicator */}
+                                        <div className={`mt-2 flex items-center gap-1.5 text-[10px] px-2 py-1 rounded border w-fit ${isDbConnected ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : 'text-red-600 bg-red-50 border-red-200'}`}>
+                                            {isDbConnected ? <Database size={10} /> : <WifiOff size={10}/>} 
+                                            {isDbConnected ? 'Connected to Supabase' : 'Offline Mode'}
                                         </div>
                                      </div>
                                      
                                      <div className="p-1">
-                                        {/* Mobile Navigation inside Menu */}
                                         <div className="md:hidden border-b border-slate-100 pb-1 mb-1">
                                             <button onClick={() => { setActiveView('MODULES'); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><BookOpen size={16}/> Materi Belajar</button>
                                             <button onClick={() => { setActiveView('EXAMS'); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-3 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><CheckCircle2 size={16}/> Ujian Harian</button>
                                         </div>
+
+                                        {/* ADMIN SHORTCUTS FOR MOBILE */}
+                                        {role === 'ADMIN' && (
+                                            <div className="border-b border-slate-100 pb-1 mb-1 lg:hidden">
+                                                <div className="px-4 py-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider">Menu Admin</div>
+                                                <button onClick={() => { setIsQuizManagerOpen(true); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><BrainCircuit size={16}/> Manajemen Kuis</button>
+                                                <button onClick={() => { setIsStudentManagerOpen(true); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><Users size={16}/> Data Siswa</button>
+                                                <button onClick={() => { setIsReportsOpen(true); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><BarChart3 size={16}/> Laporan Nilai</button>
+                                                <button onClick={() => { setUploadTargetClass(undefined); setIsUploadOpen(true); setIsProfileMenuOpen(false); }} className="w-full text-left px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 flex items-center gap-3"><PlusCircle size={16}/> Unggah Materi</button>
+                                            </div>
+                                        )}
+
                                         <button 
                                             onClick={handleLogout}
                                             className="w-full text-left px-4 py-3 text-sm font-medium text-red-600 hover:bg-red-50 rounded-lg flex items-center gap-3 transition-colors"
@@ -602,17 +505,6 @@ const App: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Offline Warning Banner */}
-        {!isSupabaseConfigured() && (
-            <div className="bg-orange-50 border border-orange-200 text-orange-800 px-4 py-3 rounded-xl mb-6 flex items-center gap-3 animate-in slide-in-from-top-2">
-                <WifiOff size={20} className="shrink-0"/>
-                <div>
-                    <p className="font-bold text-sm">Mode Demo (Offline)</p>
-                    <p className="text-xs">Database belum terhubung (Invalid API Key). Data yang Anda masukkan akan disimpan sementara di browser dan hilang saat refresh.</p>
-                </div>
-            </div>
-        )}
-
         {/* Header Section */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-6 mb-10">
           <div>
@@ -685,7 +577,12 @@ const App: React.FC = () => {
         </div>
 
         {/* MAIN CONTENT AREA */}
-        {activeView === 'MODULES' ? (
+        {isLoadingData ? (
+            <div className="py-20 text-center">
+                <div className="animate-spin w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full mx-auto mb-4"></div>
+                <p className="text-slate-500 font-medium">Memuat data dari database...</p>
+            </div>
+        ) : activeView === 'MODULES' ? (
             /* MODULES GRID VIEW */
             filteredModules.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -848,7 +745,7 @@ const App: React.FC = () => {
         onClose={() => setIsUploadOpen(false)} 
         onUpload={handleUpload} 
         classes={classNames} 
-        initialTargetClass={uploadTargetClass} // Pass selected class
+        initialTargetClass={uploadTargetClass} 
       />
       
       <LoginModal 
@@ -869,7 +766,7 @@ const App: React.FC = () => {
         onUpdateStudent={handleUpdateStudent}
         onDeleteStudent={handleDeleteStudent}
         onUpdateClasses={handleUpdateClasses}
-        onUploadModule={handleOpenUploadForClass} // Pass handler to StudentManager
+        onUploadModule={handleOpenUploadForClass} 
       />
 
       <QuizManager
@@ -889,7 +786,7 @@ const App: React.FC = () => {
         onAddManualGrade={handleAddManualGrade}
         onUpdateManualGrade={handleUpdateManualGrade}
         onDeleteManualGrade={handleDeleteManualGrade}
-        onResetExam={handleResetExam} // Pass down reset function
+        onResetExam={handleResetExam} 
         modules={modules}
       />
       
@@ -900,11 +797,6 @@ const App: React.FC = () => {
             handleLogout();
         }}
         onChangePassword={handleChangePassword}
-      />
-
-      <SettingsModal 
-        isOpen={isSettingsOpen} 
-        onClose={() => setIsSettingsOpen(false)}
       />
 
     </div>

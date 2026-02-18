@@ -25,43 +25,48 @@ const getEnv = (key: string, fallbackKey?: string): string => {
   return value;
 };
 
-// Cek kedua format penamaan (VITE_... dan REACT_APP_...)
 const supabaseUrl = getEnv('VITE_SUPABASE_URL', 'REACT_APP_SUPABASE_URL');
 const supabaseKey = getEnv('VITE_SUPABASE_ANON_KEY', 'REACT_APP_SUPABASE_ANON_KEY');
 
 const isKeyValid = supabaseUrl && supabaseKey && supabaseUrl !== 'https://your-project.supabase.co';
 
 if (!isKeyValid) {
-  console.warn("⚠️ Supabase Config Missing or Invalid! App running in Demo Mode.");
+  console.warn("⚠️ Supabase Config Missing! App may not work correctly.");
 }
 
-// Gunakan dummy URL jika kosong agar aplikasi TIDAK CRASH
+// Gunakan dummy URL jika kosong agar aplikasi TIDAK CRASH saat inisialisasi awal
 const validUrl = isKeyValid ? supabaseUrl : 'https://placeholder.supabase.co';
 const validKey = isKeyValid ? supabaseKey : 'placeholder-key';
 
 // Initialize Supabase
 export const supabase = createClient(validUrl, validKey);
 
-// Export helper status
 export const isSupabaseConfigured = () => isKeyValid;
 
 /**
- * Fungsi sederhana untuk mengecek koneksi ke Supabase.
+ * Upload file to Supabase Storage bucket 'materials'
  */
-export const testConnection = async () => {
-  try {
-    if (!isKeyValid) {
-        return { success: false, message: "Mode Offline: API Key belum disetting." };
-    }
+export const uploadFile = async (file: File): Promise<string | null> => {
+    if (!isKeyValid) return null;
 
-    const { data, error } = await supabase.from('modules').select('count').limit(1);
-    
-    if (error) {
-      return { success: false, message: `Error Supabase: ${error.message}` };
+    try {
+        const fileExt = file.name.split('.').pop();
+        const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+        const filePath = `${fileName}`;
+
+        const { error: uploadError } = await supabase.storage
+            .from('materials')
+            .upload(filePath, file);
+
+        if (uploadError) {
+            console.error('Upload Error:', uploadError);
+            throw uploadError;
+        }
+
+        const { data } = supabase.storage.from('materials').getPublicUrl(filePath);
+        return data.publicUrl;
+    } catch (error) {
+        console.error("Supabase Upload Failed:", error);
+        return null;
     }
-    
-    return { success: true, message: "Terhubung ke Supabase!" };
-  } catch (err: any) {
-    return { success: false, message: err.message || "Unknown connection error" };
-  }
 };

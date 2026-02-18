@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { ModuleCategory } from '../types';
 import { generateModuleMetadata } from '../services/geminiService';
-import { X, Upload, Sparkles, FileText, CheckCircle, Users, AlertTriangle } from 'lucide-react';
+import { uploadFile } from '../services/supabase';
+import { X, Upload, Sparkles, FileText, CheckCircle, Users, AlertTriangle, Loader2 } from 'lucide-react';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -38,9 +39,9 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const selectedFile = e.target.files[0];
-      // Limit file size to 3MB for Supabase storage (Idealnya pakai Storage bucket, tapi Base64 cukup untuk demo text/pdf kecil)
-      if (selectedFile.size > 3 * 1024 * 1024) {
-          alert("Ukuran file terlalu besar! Maksimal 3MB untuk penyimpanan database langsung.");
+      // Limit file size to 10MB for Supabase Storage
+      if (selectedFile.size > 10 * 1024 * 1024) {
+          alert("Ukuran file terlalu besar! Maksimal 10MB untuk Supabase Storage.");
           return;
       }
       setFile(selectedFile);
@@ -63,31 +64,31 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
       );
   };
 
-  const convertFileToBase64 = (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.readAsDataURL(file);
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = error => reject(error);
-    });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !title) return;
+    if (!title) return;
 
     setIsProcessingFile(true);
 
     try {
-        // Convert file to Base64 string to store in Supabase
-        const fileBase64 = await convertFileToBase64(file);
+        let publicUrl = '';
+        
+        if (file) {
+            const url = await uploadFile(file);
+            if (!url) {
+                alert("Gagal mengunggah file ke Supabase Storage. Cek koneksi atau konfigurasi bucket.");
+                setIsProcessingFile(false);
+                return;
+            }
+            publicUrl = url;
+        }
 
         onUpload({
             title,
             description,
             category,
-            fileUrl: fileBase64, // Stored as string in DB, visible to all devices
-            fileName: file.name,
+            fileUrl: publicUrl, // Stored as Supabase Public URL
+            fileName: file ? file.name : '',
             aiSummary: aiData?.summary || '',
             tags: aiData?.tags || [],
             targetClasses: selectedClasses.length > 0 ? selectedClasses : undefined,
@@ -132,7 +133,6 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                   type="file" 
                   onChange={handleFileChange} 
                   className="absolute inset-0 opacity-0 cursor-pointer"
-                  required
                 />
                 <div className={`p-3 rounded-full mb-3 ${file ? 'bg-green-100 text-green-600' : 'bg-indigo-100 text-indigo-600 group-hover:bg-white group-hover:scale-110 transition-transform'}`}>
                    {file ? <CheckCircle size={24}/> : <FileText size={24} />}
@@ -142,7 +142,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                 ) : (
                   <>
                     <p className="text-sm font-medium text-slate-800">Klik untuk pilih file</p>
-                    <p className="text-xs text-slate-500 mt-1">atau tarik file ke sini (Max 3MB)</p>
+                    <p className="text-xs text-slate-500 mt-1">atau tarik file ke sini (Max 10MB)</p>
                   </>
                 )}
               </div>
@@ -257,8 +257,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                     <FileText size={16}/>
                     Info Penting:
                 </div>
-                <p>1. <strong>Isi Deskripsi dengan Lengkap:</strong> AI membuat soal berdasarkan teks yang Anda tulis di kolom Deskripsi, bukan dari file PDF (saat ini).</p>
-                <p>2. File PDF/Doc hanya disimpan untuk diunduh oleh siswa.</p>
+                <p>1. <strong>Supabase Storage:</strong> File akan diupload ke bucket 'materials' di Supabase.</p>
+                <p>2. AI tetap menggunakan teks Deskripsi untuk membuat soal (bukan isi file PDF).</p>
             </div>
 
           </form>
@@ -276,9 +276,10 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
             type="submit" 
             form="upload-form"
             disabled={isProcessingFile}
-            className="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-70 disabled:scale-100"
+            className="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-70 disabled:scale-100 flex items-center gap-2"
           >
-            {isProcessingFile ? 'Sedang Mengunggah...' : 'Unggah Materi'}
+            {isProcessingFile && <Loader2 size={16} className="animate-spin"/>}
+            {isProcessingFile ? 'Mengunggah...' : 'Unggah Materi'}
           </button>
         </div>
       </div>

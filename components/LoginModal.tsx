@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
+import { supabase } from '../services/supabase';
 import { Role, Student } from '../types';
-import { Lock, User, KeyRound, GraduationCap, X, School, Info, Eye, EyeOff, Database, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
-import { testConnection } from '../services/supabase';
+import { Lock, User, KeyRound, X, School, Info, Eye, EyeOff, Loader2 } from 'lucide-react';
 
 interface LoginModalProps {
   isOpen: boolean;
   onClose: () => void;
   onLogin: (role: Role, userData?: any) => void;
-  students: Student[];
+  students: Student[]; // This prop is kept for compatibility but main check is done via DB
 }
 
-const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, students }) => {
+const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin }) => {
   const [activeTab, setActiveTab] = useState<'ADMIN' | 'STUDENT'>('STUDENT');
   
   // Admin Form State
@@ -22,19 +22,17 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
   const [studentPass, setStudentPass] = useState('');
   
   const [error, setError] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   
   // Password Visibility State
   const [showAdminPass, setShowAdminPass] = useState(false);
   const [showStudentPass, setShowStudentPass] = useState(false);
 
-  // Connection Test State
-  const [connectionStatus, setConnectionStatus] = useState<'IDLE' | 'LOADING' | 'SUCCESS' | 'ERROR'>('IDLE');
-  const [connectionMsg, setConnectionMsg] = useState('');
-
   if (!isOpen) return null;
 
   const handleAdminLogin = (e: React.FormEvent) => {
     e.preventDefault();
+    // Static Admin Credentials for this Demo App
     if (adminUser === 'admin' && adminPass === 'admin12345') {
       onLogin('ADMIN', { name: 'Admin Guru' });
       onClose();
@@ -43,29 +41,33 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
     }
   };
 
-  const handleStudentLogin = (e: React.FormEvent) => {
+  const handleStudentLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const student = students.find(s => s.nis === nis && s.password === studentPass);
-    
-    if (student) {
-      onLogin('STUDENT', student);
-      onClose();
-    } else {
-      setError('NIS atau password salah. Hubungi guru jika lupa.');
-    }
-  };
+    setIsLoading(true);
+    setError('');
 
-  const runConnectionTest = async () => {
-      setConnectionStatus('LOADING');
-      const result = await testConnection();
-      
-      if (result.success) {
-          setConnectionStatus('SUCCESS');
-          setConnectionMsg(result.message);
-      } else {
-          setConnectionStatus('ERROR');
-          setConnectionMsg(result.message);
-      }
+    try {
+        // Query database for student
+        const { data: student, error } = await supabase
+            .from('students')
+            .select('*')
+            .eq('nis', nis)
+            .single();
+
+        if (error || !student) {
+            setError('NIS tidak ditemukan.');
+        } else if (student.password !== studentPass) {
+            setError('Password salah.');
+        } else {
+            onLogin('STUDENT', student);
+            onClose();
+        }
+    } catch (err) {
+        setError('Terjadi kesalahan koneksi.');
+        console.error(err);
+    } finally {
+        setIsLoading(false);
+    }
   };
 
   return (
@@ -153,13 +155,6 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
                 </form>
             ) : (
                 <form onSubmit={handleStudentLogin} className="space-y-4">
-                     <div className="bg-emerald-50 p-3 rounded-lg border border-emerald-100 flex items-start gap-2">
-                         <Info size={16} className="text-emerald-600 mt-0.5 shrink-0" />
-                         <p className="text-xs text-emerald-700">
-                            Contoh Siswa: NIS <b>12345</b>, Password <b>password</b>
-                         </p>
-                    </div>
-
                      <div>
                         <label className="block text-xs font-bold uppercase text-slate-500 mb-1">NIS (Nomor Induk Siswa)</label>
                         <div className="relative">
@@ -193,45 +188,16 @@ const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin, stude
                             </button>
                         </div>
                     </div>
-                    <button type="submit" className="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-semibold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 mt-2">
-                        Login Siswa
+                    <button 
+                        type="submit" 
+                        disabled={isLoading}
+                        className="w-full bg-emerald-600 text-white py-2.5 rounded-lg font-semibold hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200 mt-2 flex items-center justify-center gap-2"
+                    >
+                        {isLoading && <Loader2 size={18} className="animate-spin"/>}
+                        {isLoading ? 'Memverifikasi...' : 'Login Siswa'}
                     </button>
                 </form>
             )}
-
-            {/* CONNECTION TEST UTILITY */}
-            <div className="mt-6 pt-4 border-t border-slate-100 text-center">
-                <p className="text-xs text-slate-400 mb-2">Mengalami kendala data tidak muncul?</p>
-                
-                {connectionStatus === 'IDLE' && (
-                    <button 
-                        onClick={runConnectionTest}
-                        className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1.5 mx-auto bg-slate-50 px-3 py-1.5 rounded-full border border-slate-200 hover:border-indigo-200 transition-all"
-                    >
-                        <Database size={12} /> Cek Koneksi Database
-                    </button>
-                )}
-
-                {connectionStatus === 'LOADING' && (
-                    <span className="text-xs text-indigo-500 flex items-center justify-center gap-1.5">
-                        <Loader2 size={12} className="animate-spin"/> Menghubungkan...
-                    </span>
-                )}
-
-                {connectionStatus === 'SUCCESS' && (
-                    <div className="text-xs text-emerald-600 bg-emerald-50 px-3 py-2 rounded-lg border border-emerald-100 flex flex-col items-center">
-                         <span className="font-bold flex items-center gap-1"><CheckCircle size={12}/> Koneksi Berhasil!</span>
-                         <span className="text-[10px] mt-0.5">Jika data masih kosong, cek RLS Policies di Supabase.</span>
-                    </div>
-                )}
-
-                {connectionStatus === 'ERROR' && (
-                    <div className="text-xs text-red-600 bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-left">
-                        <span className="font-bold flex items-center gap-1 mb-1"><AlertTriangle size={12}/> Koneksi Gagal</span>
-                        <p className="break-all">{connectionMsg}</p>
-                    </div>
-                )}
-            </div>
         </div>
       </div>
     </div>
