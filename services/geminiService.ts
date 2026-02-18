@@ -14,6 +14,9 @@ export const setGlobalApiKey = (key: string) => {
   dbApiKey = key;
 };
 
+// Helper for delay (backoff)
+const wait = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
 // Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
   let value = '';
@@ -279,27 +282,75 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
-    const parts: any[] = [];
-    if (files && files.length > 0) {
-      files.forEach(f => {
-        parts.push({
-            inlineData: {
-                mimeType: f.mimeType,
-                data: f.data
-            }
-        });
-      });
-    }
-    parts.push({ text: promptText });
+    // Internal helper to call API with retry capability
+    const generateWithRetry = async (useFiles: boolean) => {
+        const MAX_RETRIES = 3;
+        let lastError;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.5, // Lower temperature to be more deterministic/relevant
-      }
-    });
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+            try {
+                const parts: any[] = [];
+                if (useFiles && files && files.length > 0) {
+                    files.forEach(f => {
+                        parts.push({
+                            inlineData: {
+                                mimeType: f.mimeType,
+                                data: f.data
+                            }
+                        });
+                    });
+                }
+                parts.push({ text: promptText });
+
+                return await ai.models.generateContent({
+                    model: MODEL_NAME,
+                    contents: { parts },
+                    config: {
+                        responseMimeType: "application/json",
+                        temperature: 0.5, 
+                    }
+                });
+            } catch (e: any) {
+                lastError = e;
+                console.warn(`Attempt ${attempt + 1} failed:`, e.message);
+                
+                const isLimitError = e.message?.includes('429') || e.status === 429 || e.message?.includes('Quota') || e.message?.includes('Limit');
+                
+                if (isLimitError) {
+                    // If we used files and hit a limit, DO NOT retry with files. 
+                    // Fail immediately so we can fallback to text-only mode which is cheaper.
+                    if (useFiles && files && files.length > 0) {
+                        throw e; 
+                    }
+                    // If text-only hit limit, wait longer and retry
+                    await wait(2000 * (attempt + 1));
+                } else {
+                    // Other errors (network, parsing), wait briefly
+                    await wait(1000);
+                }
+            }
+        }
+        throw lastError;
+    };
+
+    let response;
+    
+    try {
+        // Attempt 1: Try with full context (files + text)
+        response = await generateWithRetry(true);
+    } catch (e) {
+        // Fallback: If failed (likely Limit Exceeded due to large files), try Text-Only
+        if (files && files.length > 0) {
+            console.log("⚠️ Switching to Text-Only mode due to error/limit with files.");
+            try {
+                response = await generateWithRetry(false);
+            } catch (fallbackError) {
+                throw fallbackError; // If text-only also fails, throw real error
+            }
+        } else {
+            throw e;
+        }
+    }
 
     let text = response.text;
     if (!text) {
@@ -328,7 +379,7 @@ export const generateQuizQuestions = async (
     console.error("Error generating quiz:", error);
     // Provide more descriptive error messages
     let msg = error.message || "Gagal menghubungi API Gemini.";
-    if (msg.includes('429')) msg = "Kuota API Key habis (Limit Exceeded). Tunggu sebentar.";
+    if (msg.includes('429')) msg = "Kuota API Key habis sementara (Limit Exceeded). Tunggu 10-30 detik lalu coba lagi.";
     if (msg.includes('400') || msg.includes('403')) msg = "API Key tidak valid atau tidak memiliki akses ke model 'gemini-3-flash'. Coba gunakan API Key lain.";
     if (msg.includes('JSON')) msg = "Gagal memproses format jawaban AI. Coba lagi.";
     
