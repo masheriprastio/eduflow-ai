@@ -49,23 +49,50 @@ const App: React.FC = () => {
   // --- SUPABASE DATA FETCHING & LISTENERS ---
   
   const fetchAllData = async () => {
-      // Helper to fetch data safely
-      const fetchTable = async (table: string, setter: React.Dispatch<React.SetStateAction<any[]>>, orderBy = 'created_at') => {
-          if (!isSupabaseConfigured()) return; // Skip fetch if not configured
-          const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false });
-          if (error) console.error(`Error fetching ${table}:`, error);
-          else setter(data || []);
+      // 1. Create a timeout promise that resolves after 5 seconds to prevent infinite loading
+      const timeoutPromise = new Promise((resolve) => {
+          setTimeout(() => {
+              console.warn("Data fetching timed out - forcing app load.");
+              resolve('TIMEOUT');
+          }, 5000);
+      });
+
+      // 2. Create the actual data fetching promise
+      const fetchDataPromise = async () => {
+          // Helper to fetch data safely
+          const fetchTable = async (table: string, setter: React.Dispatch<React.SetStateAction<any[]>>, orderBy = 'created_at') => {
+              if (!isSupabaseConfigured()) return; // Skip fetch if not configured
+              try {
+                  const { data, error } = await supabase.from(table).select('*').order(orderBy, { ascending: false });
+                  if (error) {
+                      console.warn(`Error fetching ${table}:`, error.message);
+                  } else {
+                      setter(data || []);
+                  }
+              } catch (err) {
+                  console.warn(`Exception fetching ${table}:`, err);
+              }
+          };
+
+          await Promise.all([
+              fetchTable('classes', setClasses),
+              fetchTable('modules', setModules, 'uploadDate'), // Order by uploadDate
+              fetchTable('students', setStudents),
+              fetchTable('results', setQuizResults, 'submittedAt'),
+              fetchTable('grades', setManualGrades, 'date')
+          ]);
       };
 
-      await Promise.all([
-          fetchTable('classes', setClasses),
-          fetchTable('modules', setModules, 'uploadDate'), // Order by uploadDate
-          fetchTable('students', setStudents),
-          fetchTable('results', setQuizResults, 'submittedAt'),
-          fetchTable('grades', setManualGrades, 'date')
-      ]);
-      
-      setIsLoadingData(false);
+      try {
+          // Race between fetching and timeout
+          // If fetching is fast, good. If it hangs, timeout wins and we proceed.
+          await Promise.race([fetchDataPromise(), timeoutPromise]);
+      } catch (error) {
+          console.error("Critical error during initial data load:", error);
+      } finally {
+          // ALWAYS turn off loading screen
+          setIsLoadingData(false);
+      }
   };
 
   useEffect(() => {
@@ -73,39 +100,43 @@ const App: React.FC = () => {
     fetchAllData();
 
     // 2. Setup Realtime Subscription (Only if configured)
+    let channel: any;
     if (isSupabaseConfigured()) {
-        const channel = supabase.channel('public-db-changes')
-            .on(
-                'postgres_changes', 
-                { event: '*', schema: 'public' }, 
-                (payload) => {
-                    const table = payload.table;
-                    console.log('Change detected in:', table);
-                    
-                    if (table === 'classes') {
-                        supabase.from('classes').select('*').order('created_at', { ascending: false })
-                            .then(({data}) => setClasses(data || []));
-                    } else if (table === 'modules') {
-                        supabase.from('modules').select('*').order('uploadDate', { ascending: false })
-                            .then(({data}) => setModules(data || []));
-                    } else if (table === 'students') {
-                        supabase.from('students').select('*').order('created_at', { ascending: false })
-                            .then(({data}) => setStudents(data || []));
-                    } else if (table === 'results') {
-                        supabase.from('results').select('*').order('submittedAt', { ascending: false })
-                            .then(({data}) => setQuizResults(data || []));
-                    } else if (table === 'grades') {
-                        supabase.from('grades').select('*').order('date', { ascending: false })
-                            .then(({data}) => setManualGrades(data || []));
+        try {
+            channel = supabase.channel('public-db-changes')
+                .on(
+                    'postgres_changes', 
+                    { event: '*', schema: 'public' }, 
+                    (payload) => {
+                        const table = payload.table;
+                        // Refresh data silently on change
+                        if (table === 'classes') {
+                            supabase.from('classes').select('*').order('created_at', { ascending: false })
+                                .then(({data}) => setClasses(data || []));
+                        } else if (table === 'modules') {
+                            supabase.from('modules').select('*').order('uploadDate', { ascending: false })
+                                .then(({data}) => setModules(data || []));
+                        } else if (table === 'students') {
+                            supabase.from('students').select('*').order('created_at', { ascending: false })
+                                .then(({data}) => setStudents(data || []));
+                        } else if (table === 'results') {
+                            supabase.from('results').select('*').order('submittedAt', { ascending: false })
+                                .then(({data}) => setQuizResults(data || []));
+                        } else if (table === 'grades') {
+                            supabase.from('grades').select('*').order('date', { ascending: false })
+                                .then(({data}) => setManualGrades(data || []));
+                        }
                     }
-                }
-            )
-            .subscribe();
-
-        return () => {
-            supabase.removeChannel(channel);
-        };
+                )
+                .subscribe();
+        } catch (err) {
+            console.error("Realtime subscription error:", err);
+        }
     }
+
+    return () => {
+        if (channel) supabase.removeChannel(channel);
+    };
   }, []);
 
 
