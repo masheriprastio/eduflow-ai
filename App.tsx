@@ -679,13 +679,6 @@ const App: React.FC = () => {
                     {role === 'STUDENT' && (
                         <>
                             <button 
-                                onClick={() => { resetModals(); setIsReportsOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <BarChart3 size={20} />
-                                Lihat Nilai Saya
-                            </button>
-                            <button 
                                 onClick={() => { resetModals(); setIsChangePassOpen(true); }}
                                 className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
                             >
@@ -804,22 +797,39 @@ const App: React.FC = () => {
                     </div>
 
                     {/* Filter Bar & Actions */}
-                    <div className="flex flex-col xl:flex-row gap-4 mb-8 sticky top-0 z-30 bg-slate-50/95 backdrop-blur-sm py-4 border-b border-slate-200 xl:border-none xl:bg-transparent xl:static">
+                    <div className="flex flex-col gap-4 mb-8 sticky top-0 z-30 bg-slate-50/95 backdrop-blur-sm py-4 border-b border-slate-200 xl:border-none xl:bg-transparent xl:static">
                         
-                        {/* Search Input */}
-                        <div className="relative flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
-                            <input 
-                                type="text" 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Cari materi pembelajaran..." 
-                                className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-700 transition-all bg-white"
-                            />
+                        <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                            {/* Search Input */}
+                            <div className="relative flex-1 w-full">
+                                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
+                                <input 
+                                    type="text" 
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    placeholder="Cari materi pembelajaran..." 
+                                    className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-700 transition-all bg-white"
+                                />
+                            </div>
+
+                            {/* Admin Action */}
+                            {role === 'ADMIN' && (
+                                <button 
+                                    onClick={() => {
+                                        setEditingModule(undefined); 
+                                        setUploadTargetClass(undefined);
+                                        setIsUploadOpen(true);
+                                    }}
+                                    className="flex items-center justify-center gap-2 bg-slate-900 text-white px-6 py-3.5 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all active:scale-95 shrink-0 w-full md:w-auto"
+                                >
+                                    <PlusCircle size={20} />
+                                    <span>Upload Materi</span>
+                                </button>
+                            )}
                         </div>
                         
                         {/* Category Filter */}
-                        <div className="flex gap-2 overflow-x-auto pb-2 xl:pb-0 scrollbar-hide">
+                        <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide w-full">
                             <button 
                                 onClick={() => setSelectedCategory('All')}
                                 className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedCategory === 'All' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
@@ -836,21 +846,6 @@ const App: React.FC = () => {
                                 </button>
                             ))}
                         </div>
-
-                        {/* Admin Action */}
-                        {role === 'ADMIN' && (
-                            <button 
-                                onClick={() => {
-                                    setEditingModule(undefined); 
-                                    setUploadTargetClass(undefined);
-                                    setIsUploadOpen(true);
-                                }}
-                                className="flex items-center justify-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all active:scale-95 shrink-0"
-                            >
-                                <PlusCircle size={20} />
-                                <span className="hidden sm:inline">Upload Materi</span>
-                            </button>
-                        )}
                     </div>
 
                     {/* Content Grid */}
