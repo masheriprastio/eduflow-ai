@@ -3,6 +3,13 @@ import { Question } from "../types";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
 
+// Global variable to store key fetched from DB (Supabase)
+let dbApiKey: string | null = null;
+
+export const setGlobalApiKey = (key: string) => {
+  dbApiKey = key;
+};
+
 // Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
   let value = '';
@@ -26,20 +33,22 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 // Helper to get AI client safely inside functions
 // Returns NULL if no key is found (triggering Mock Mode)
 const getAiClient = (): GoogleGenAI | null => {
-  // 1. Coba ambil dari Local Storage (Input User via SettingsModal)
-  let apiKey = '';
+  // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin)
+  let apiKey = dbApiKey || '';
+
+  // 2. Coba ambil dari Local Storage (Fallback input manual per device)
   try {
-      if (typeof window !== 'undefined') {
+      if (!apiKey && typeof window !== 'undefined') {
           apiKey = localStorage.getItem('USER_API_KEY') || '';
       }
   } catch (e) {}
 
-  // 2. Jika tidak ada di Local Storage, coba Environment Variables
+  // 3. Jika tidak ada, coba Environment Variables
   if (!apiKey) {
       apiKey = getEnv('VITE_API_KEY', 'REACT_APP_API_KEY') || getEnv('API_KEY');
   }
   
-  // 3. Validasi
+  // 4. Validasi
   if (!apiKey || apiKey === 'dummy-key') {
       console.warn("Gemini API Key missing! Using Mock Mode.");
       return null;
@@ -269,7 +278,7 @@ export const askAboutModule = async (moduleTitle: string, moduleContext: string,
   // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
     await mockDelay();
-    return `(Tutor AI Demo) Halo! Karena API Key belum dikonfigurasi, saya hanya bisa memberikan respon simulasi. Silakan masukkan API Key Anda di menu Pengaturan (ikon gerigi) di pojok kanan atas agar saya bisa menjawab dengan cerdas sesuai materi.`;
+    return `(Tutor AI Demo) Halo! Sepertinya Admin/Guru belum mengonfigurasi API Key di sistem. Harap hubungi guru Anda agar saya bisa aktif.`;
   }
 
   try {

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { X, Key, Save, Trash2, ExternalLink } from 'lucide-react';
+import { X, Key, Save, Trash2, ExternalLink, Database, Globe, HardDrive, Loader2 } from 'lucide-react';
+import { supabase, isSupabaseConfigured } from '../services/supabase';
 
 interface SettingsModalProps {
   isOpen: boolean;
@@ -8,27 +9,86 @@ interface SettingsModalProps {
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   
   useEffect(() => {
     if (isOpen) {
+        // 1. Coba baca dari Local Storage dulu (Prioritas cache lokal)
         const stored = localStorage.getItem('USER_API_KEY');
-        if (stored) setApiKey(stored);
+        if (stored) {
+            setApiKey(stored);
+        } else if (isSupabaseConfigured()) {
+            // 2. Jika lokal kosong, coba ambil dari Database (Sinkronisasi Global)
+            supabase.from('system_settings')
+                .select('value')
+                .eq('key', 'gemini_api_key')
+                .single()
+                .then(({ data }) => {
+                    if (data && data.value) setApiKey(data.value);
+                });
+        }
     }
   }, [isOpen]);
 
-  const handleSave = () => {
-    if (apiKey.trim()) {
-        localStorage.setItem('USER_API_KEY', apiKey.trim());
-        alert("API Key berhasil disimpan! Fitur AI sekarang aktif menggunakan key Anda.");
-        window.location.reload(); // Reload to refresh services
+  const handleSave = async () => {
+    if (!apiKey.trim()) return;
+    setIsSaving(true);
+    const trimmedKey = apiKey.trim();
+
+    // 1. Selalu simpan ke Local Storage (Fallback Cepat)
+    localStorage.setItem('USER_API_KEY', trimmedKey);
+
+    // 2. Coba simpan ke Supabase System Settings (Agar tersinkron ke Siswa)
+    let dbSuccess = false;
+    let dbErrorMsg = '';
+
+    if (isSupabaseConfigured()) {
+        try {
+            // Upsert: Insert atau Update jika key 'gemini_api_key' sudah ada
+            // Pastikan tabel 'system_settings' memiliki kolom: key (text, PK), value (text)
+            const { error } = await supabase
+                .from('system_settings')
+                .upsert({ key: 'gemini_api_key', value: trimmedKey }, { onConflict: 'key' });
+
+            if (!error) {
+                dbSuccess = true;
+            } else {
+                dbErrorMsg = error.message;
+                console.warn("Gagal simpan ke DB:", error);
+            }
+        } catch (e: any) {
+            dbErrorMsg = e.message || 'Connection Error';
+        }
     }
+
+    setIsSaving(false);
+
+    if (dbSuccess) {
+        alert("BERHASIL! API Key tersimpan di Database Pusat.\n\nSemua siswa sekarang dapat menggunakan fitur Tutor AI tanpa perlu memasukkan key manual.");
+    } else {
+        const msg = isSupabaseConfigured() 
+            ? `Peringatan: Gagal menyimpan ke Database (${dbErrorMsg}).\nKemungkinan tabel 'system_settings' belum dibuat di Supabase.\nKey hanya tersimpan di browser ini sementara.`
+            : "Mode Offline: API Key disimpan di browser ini saja (Local Storage).";
+        alert(msg);
+    }
+    
+    window.location.reload(); // Refresh agar App.tsx mengambil ulang key baru
   };
 
-  const handleClear = () => {
-    localStorage.removeItem('USER_API_KEY');
-    setApiKey('');
-    alert("API Key dihapus. Aplikasi kembali ke Mode Demo (Simulasi).");
-    window.location.reload();
+  const handleClear = async () => {
+    if (confirm("Yakin ingin menghapus API Key dari sistem? Fitur AI akan kembali ke Mode Demo.")) {
+        setIsSaving(true);
+        localStorage.removeItem('USER_API_KEY');
+        
+        if (isSupabaseConfigured()) {
+            await supabase.from('system_settings').delete().eq('key', 'gemini_api_key');
+        }
+
+        setApiKey('');
+        setIsSaving(false);
+        alert("API Key dihapus.");
+        window.location.reload();
+    }
   };
 
   if (!isOpen) return null;
@@ -44,22 +104,20 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                 </div>
                 <div>
                     <h2 className="text-lg font-bold text-slate-800">Pengaturan API Key</h2>
-                    <p className="text-xs text-slate-500">Konfigurasi akses Google Gemini AI</p>
+                    <p className="text-xs text-slate-500">Konfigurasi Akses Gemini AI (Global)</p>
                 </div>
             </div>
 
             <div className="space-y-4">
-                <div className="bg-blue-50 p-3 rounded-lg border border-blue-100 text-xs text-blue-700 leading-relaxed">
-                    <p className="font-bold mb-1 flex items-center gap-1"><ExternalLink size={12}/> Info:</p>
-                    Saat ini aplikasi berjalan dalam <strong>Mode Demo</strong> (Simulasi) karena server tidak memiliki API Key.
+                <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 text-xs text-indigo-800 leading-relaxed shadow-sm">
+                    <p className="font-bold mb-2 flex items-center gap-1.5"><Globe size={14}/> Sinkronisasi Otomatis</p>
+                    Sebagai Admin/Guru, API Key yang Anda masukkan di sini akan <strong>disimpan ke database pusat</strong>.
                     <br/><br/>
-                    Agar Tutor AI dan Generator Soal berfungsi sungguhan, silakan masukkan <strong>Google Gemini API Key</strong> Anda sendiri di bawah ini.
-                    <br/><br/>
-                    <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="underline font-bold hover:text-blue-800">Dapatkan API Key Gratis di sini</a>
+                    Artinya, <strong>Siswa TIDAK PERLU</strong> memasukkan API Key lagi. Mereka akan otomatis menggunakan key yang Anda atur di sini untuk mengakses Tutor AI.
                 </div>
 
                 <div>
-                    <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Paste Gemini API Key</label>
+                    <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Google Gemini API Key</label>
                     <input 
                         type="password" 
                         value={apiKey}
@@ -67,20 +125,36 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                         placeholder="Contoh: AIzaSy..."
                         className="w-full p-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-indigo-500 outline-none text-sm font-mono"
                     />
-                    <p className="text-[10px] text-slate-400 mt-1">Key disimpan secara lokal di browser Anda.</p>
+                    <div className="flex items-center gap-2 mt-2">
+                        {isSupabaseConfigured() ? (
+                            <span className="text-[10px] flex items-center gap-1 text-emerald-600 font-medium bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-100">
+                                <Database size={10}/> Database Terhubung
+                            </span>
+                        ) : (
+                             <span className="text-[10px] flex items-center gap-1 text-orange-600 font-medium bg-orange-50 px-2 py-0.5 rounded-full border border-orange-100">
+                                <HardDrive size={10}/> Mode Offline (Local Only)
+                            </span>
+                        )}
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-blue-600 hover:underline ml-auto flex items-center gap-1">
+                            Dapatkan Key <ExternalLink size={10}/>
+                        </a>
+                    </div>
                 </div>
 
-                <div className="flex gap-2 pt-2">
+                <div className="flex gap-2 pt-2 border-t border-slate-100 mt-2">
                     <button 
                         onClick={handleSave}
-                        className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center justify-center gap-2"
+                        disabled={isSaving}
+                        className="flex-1 bg-indigo-600 text-white py-2.5 rounded-lg font-bold text-sm hover:bg-indigo-700 shadow-lg shadow-indigo-100 flex items-center justify-center gap-2 transition-all active:scale-95 disabled:opacity-70"
                     >
-                        <Save size={16}/> Simpan & Aktifkan
+                        {isSaving ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>} 
+                        {isSaving ? 'Menyimpan...' : 'Simpan ke Database'}
                     </button>
-                    {localStorage.getItem('USER_API_KEY') && (
+                    {(localStorage.getItem('USER_API_KEY') || apiKey) && (
                         <button 
                             onClick={handleClear}
-                            className="px-4 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold text-sm hover:bg-red-100"
+                            disabled={isSaving}
+                            className="px-4 bg-red-50 text-red-600 border border-red-100 rounded-lg font-bold text-sm hover:bg-red-100 transition-colors"
                             title="Hapus Key / Reset"
                         >
                             <Trash2 size={16}/>
