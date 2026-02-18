@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { LearningModule, Question } from '../types';
 import { generateQuizQuestions } from '../services/geminiService';
@@ -101,6 +102,20 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   const handleSaveQuizGlobal = () => {
     saveToModule(questions);
     showToast('Kuis & Jadwal berhasil disimpan!');
+  };
+
+  const handleDeleteQuiz = () => {
+      if (!selectedModuleId) return;
+      if (confirm("Yakin ingin menghapus seluruh data kuis ini? Semua soal akan hilang.")) {
+          const module = modules.find(m => m.id === selectedModuleId);
+          if (!module) return;
+          
+          onUpdateModule({ ...module, quiz: undefined });
+          setQuestions([]);
+          setSelectedModuleId(null);
+          setShowList(true);
+          showToast('Data kuis berhasil dihapus.');
+      }
   };
 
   const toggleSourceModule = (modId: string) => {
@@ -412,6 +427,13 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                         placeholder="Masukkan Judul Kuis..."
                                     />
                                 </div>
+                                <button 
+                                    onClick={handleDeleteQuiz}
+                                    className="bg-red-50 text-red-600 px-3 py-2 rounded-lg text-sm font-bold flex items-center gap-2 hover:bg-red-100 transition-colors mr-2"
+                                    title="Hapus Semua Soal & Data Kuis Ini"
+                                >
+                                    <Trash2 size={16}/> Hapus Data
+                                </button>
                                 <button 
                                     id="save-quiz-btn"
                                     onClick={handleSaveQuizGlobal}

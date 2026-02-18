@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { Role, LearningModule, ModuleCategory, Student, QuizResult, StudentAnswer, ManualGrade, ClassGroup } from './types';
 import ModuleCard from './components/ModuleCard';
@@ -187,6 +188,9 @@ const App: React.FC = () => {
   const [isChangePassOpen, setIsChangePassOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
+  // Edit State
+  const [editingModule, setEditingModule] = useState<LearningModule | undefined>(undefined);
+
   // Dropdown Menu State
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
@@ -263,6 +267,20 @@ const App: React.FC = () => {
 
   // --- CRUD HANDLERS WITH OFFLINE FALLBACK ---
 
+  // Unified Handler for Upload (Create) and Edit (Update)
+  const handleFormSubmit = async (data: Partial<LearningModule>) => {
+    // Check if it's an update (ID exists in payload or editingModule state)
+    if (data.id) {
+        const updatedModule = { ...editingModule, ...data } as LearningModule;
+        await handleUpdateModule(updatedModule);
+        setEditingModule(undefined); // Clear edit state
+    } else {
+        // Create new
+        await handleUpload(data);
+    }
+    setIsUploadOpen(false);
+  };
+
   const handleUpload = async (data: Partial<LearningModule>) => {
     const fallbackModule = { 
         ...data, 
@@ -312,9 +330,18 @@ const App: React.FC = () => {
         const { id, ...updateData } = updatedModule;
         const { error } = await supabase.from('modules').update(updateData).eq('id', id);
         if (error) throw error;
-    } catch (e) {
-        // Local Update
+        
+        // Update local state immediately for responsiveness
         setModules(prev => prev.map(m => m.id === updatedModule.id ? updatedModule : m));
+    } catch (e: any) {
+        console.error("Update error:", e);
+        // Local Update Fallback
+        if (e.message === "Offline Mode") {
+             setModules(prev => prev.map(m => m.id === updatedModule.id ? updatedModule : m));
+             alert("⚠️ Mode Offline: Perubahan disimpan sementara.");
+        } else {
+             alert("Gagal menyimpan perubahan: " + e.message);
+        }
     }
   };
 
@@ -731,6 +758,7 @@ const App: React.FC = () => {
             <div className="mb-8 flex justify-end">
                 <button 
                     onClick={() => {
+                        setEditingModule(undefined); // Clear edit state for new upload
                         setUploadTargetClass(undefined);
                         setIsUploadOpen(true);
                     }}
@@ -751,6 +779,10 @@ const App: React.FC = () => {
                         module={module} 
                         role={role}
                         onDelete={handleDeleteModule}
+                        onEdit={(mod) => {
+                            setEditingModule(mod);
+                            setIsUploadOpen(true);
+                        }}
                         onQuizSubmit={handleQuizSubmit}
                     />
                 ))}
@@ -791,9 +823,10 @@ const App: React.FC = () => {
       <UploadModal 
         isOpen={isUploadOpen} 
         onClose={() => setIsUploadOpen(false)}
-        onUpload={handleUpload}
+        onUpload={handleFormSubmit}
         classes={classNames}
         initialTargetClass={uploadTargetClass}
+        initialData={editingModule}
       />
 
       <StudentManager 
@@ -809,6 +842,7 @@ const App: React.FC = () => {
         onUpdateClasses={handleUpdateClasses}
         onUploadModule={(className) => {
             setUploadTargetClass(className);
+            setEditingModule(undefined); // Ensure fresh create mode
             setIsUploadOpen(true);
         }}
       />

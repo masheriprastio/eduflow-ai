@@ -37,6 +37,7 @@ interface ModuleCardProps {
   module: LearningModule;
   role: Role;
   onDelete?: (id: string) => void;
+  onEdit?: (module: LearningModule) => void;
   onQuizSubmit?: (moduleId: string, quizTitle: string, score: number, detailedAnswers: StudentAnswer[], violations?: number, isDisqualified?: boolean) => void;
 }
 
@@ -46,7 +47,7 @@ interface ChatMessage {
     text: string;
 }
 
-const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizSubmit }) => {
+const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onEdit, onQuizSubmit }) => {
   const [showAIHelp, setShowAIHelp] = useState(false);
   const [question, setQuestion] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -364,14 +365,27 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-white/20 text-white backdrop-blur-sm">
             {module.category}
           </span>
-          {role === 'ADMIN' && onDelete && (
-             <button 
-                onClick={() => onDelete(module.id)}
-                className="text-white/70 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
-                title="Hapus Modul"
-             >
-                <Trash2 size={18} />
-             </button>
+          {role === 'ADMIN' && (
+             <div className="flex gap-2">
+                 {onEdit && (
+                    <button 
+                        onClick={() => onEdit(module)}
+                        className="text-white/70 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                        title="Edit Modul"
+                    >
+                        <Pencil size={18} />
+                    </button>
+                 )}
+                 {onDelete && (
+                    <button 
+                        onClick={() => onDelete(module.id)}
+                        className="text-white/70 hover:text-white transition-colors p-1 rounded-full hover:bg-white/10"
+                        title="Hapus Modul"
+                    >
+                        <Trash2 size={18} />
+                    </button>
+                 )}
+             </div>
           )}
         </div>
         

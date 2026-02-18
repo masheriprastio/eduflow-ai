@@ -1,7 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
-import { ModuleCategory } from '../types';
+import { ModuleCategory, LearningModule } from '../types';
 import { generateModuleMetadata } from '../services/geminiService';
-import { X, Upload, Sparkles, FileText, CheckCircle, Users, AlertTriangle } from 'lucide-react';
+import { X, Upload, Sparkles, FileText, CheckCircle, Users, AlertTriangle, Pencil } from 'lucide-react';
 
 interface UploadModalProps {
   isOpen: boolean;
@@ -9,9 +10,10 @@ interface UploadModalProps {
   onUpload: (data: any) => void;
   classes?: string[]; // Available classes
   initialTargetClass?: string; // Optional: Pre-select a class
+  initialData?: LearningModule; // Optional: For editing existing module
 }
 
-const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, classes = [], initialTargetClass }) => {
+const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, classes = [], initialTargetClass, initialData }) => {
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<ModuleCategory>(ModuleCategory.TECHNOLOGY);
@@ -23,15 +25,34 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
   // Target Class State
   const [selectedClasses, setSelectedClasses] = useState<string[]>([]);
 
-  // Effect to pre-select class if provided
+  // Effect to handle initialization logic
   useEffect(() => {
-    if (isOpen && initialTargetClass) {
-        setSelectedClasses([initialTargetClass]);
-    } else if (isOpen && !initialTargetClass) {
-        // Reset if opened without specific target
-        setSelectedClasses([]);
+    if (isOpen) {
+        if (initialData) {
+            // Edit Mode: Populate fields
+            setTitle(initialData.title);
+            setDescription(initialData.description);
+            setCategory(initialData.category as ModuleCategory);
+            setAiData({ summary: initialData.aiSummary || '', tags: initialData.tags });
+            setSelectedClasses(initialData.targetClasses || []);
+            setFile(null); // File input is reset, but we keep reference to old URL in submission
+        } else {
+            // New Upload Mode: Reset fields
+            setTitle('');
+            setDescription('');
+            setCategory(ModuleCategory.TECHNOLOGY);
+            setAiData(null);
+            setFile(null);
+            
+            // Pre-select class if provided
+            if (initialTargetClass) {
+                setSelectedClasses([initialTargetClass]);
+            } else {
+                setSelectedClasses([]);
+            }
+        }
     }
-  }, [isOpen, initialTargetClass]);
+  }, [isOpen, initialData, initialTargetClass]);
 
   if (!isOpen) return null;
 
@@ -74,31 +95,39 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!file || !title) return;
+    // In edit mode, title is required but file is optional (keep old). In create mode, both required.
+    if (!title) return;
+    if (!initialData && !file) return; 
 
     setIsProcessingFile(true);
 
     try {
-        // Convert file to Base64 string to store in Supabase
-        const fileBase64 = await convertFileToBase64(file);
+        let fileBase64 = initialData?.fileUrl; // Default to existing file URL in edit mode
 
-        onUpload({
+        if (file) {
+            // If new file selected, convert it
+            fileBase64 = await convertFileToBase64(file);
+        }
+
+        const payload: any = {
             title,
             description,
             category,
-            fileUrl: fileBase64, // Stored as string in DB, visible to all devices
-            fileName: file.name,
+            fileUrl: fileBase64, 
+            fileName: file ? file.name : (initialData?.fileName || 'Dokumen Materi'),
             aiSummary: aiData?.summary || '',
             tags: aiData?.tags || [],
             targetClasses: selectedClasses.length > 0 ? selectedClasses : undefined,
-        });
+        };
+
+        // If editing, include ID so parent knows to update
+        if (initialData) {
+            payload.id = initialData.id;
+        }
+
+        onUpload(payload);
         
-        // Reset form
-        setTitle('');
-        setDescription('');
-        setFile(null);
-        setAiData(null);
-        setSelectedClasses([]);
+        // Reset form done by parent closing or effect
         onClose();
     } catch (error) {
         console.error("Error processing file", error);
@@ -113,8 +142,8 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh]">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-white sticky top-0 z-10">
           <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-            <Upload className="text-indigo-600" size={24} />
-            Unggah Materi Baru
+            {initialData ? <Pencil className="text-indigo-600" size={24} /> : <Upload className="text-indigo-600" size={24} />}
+            {initialData ? 'Edit Materi Pembelajaran' : 'Unggah Materi Baru'}
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 transition-colors">
             <X size={24} />
@@ -132,7 +161,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                   type="file" 
                   onChange={handleFileChange} 
                   className="absolute inset-0 opacity-0 cursor-pointer"
-                  required
+                  required={!initialData} // Required only for new uploads
                 />
                 <div className={`p-3 rounded-full mb-3 ${file ? 'bg-green-100 text-green-600' : 'bg-indigo-100 text-indigo-600 group-hover:bg-white group-hover:scale-110 transition-transform'}`}>
                    {file ? <CheckCircle size={24}/> : <FileText size={24} />}
@@ -141,8 +170,15 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
                   <p className="text-sm font-medium text-slate-800">{file.name}</p>
                 ) : (
                   <>
-                    <p className="text-sm font-medium text-slate-800">Klik untuk pilih file</p>
+                    <p className="text-sm font-medium text-slate-800">
+                        {initialData ? 'Klik untuk ganti file (Opsional)' : 'Klik untuk pilih file'}
+                    </p>
                     <p className="text-xs text-slate-500 mt-1">atau tarik file ke sini (Max 3MB)</p>
+                    {initialData && initialData.fileName && (
+                        <p className="text-xs text-emerald-600 font-bold mt-2 flex items-center justify-center gap-1">
+                            <CheckCircle size={10}/> File Saat Ini: {initialData.fileName}
+                        </p>
+                    )}
                   </>
                 )}
               </div>
@@ -278,7 +314,7 @@ const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onUpload, cl
             disabled={isProcessingFile}
             className="px-5 py-2.5 rounded-xl font-medium text-white bg-indigo-600 hover:bg-indigo-700 shadow-lg shadow-indigo-200 transition-all hover:scale-105 active:scale-95 disabled:opacity-70 disabled:scale-100"
           >
-            {isProcessingFile ? 'Sedang Mengunggah...' : 'Unggah Materi'}
+            {isProcessingFile ? 'Menyimpan...' : (initialData ? 'Simpan Perubahan' : 'Unggah Materi')}
           </button>
         </div>
       </div>
