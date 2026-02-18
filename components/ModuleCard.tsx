@@ -73,19 +73,6 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [violationMsg, setViolationMsg] = useState<string | null>(null);
 
-  // Initialize Chat
-  useEffect(() => {
-      if (showAIHelp && chatHistory.length === 0) {
-          setChatHistory([
-              {
-                  id: 'intro',
-                  role: 'ai',
-                  text: `Halo! Saya Tutor AI untuk materi "${module.title}". Silakan tanyakan apa saja yang belum kamu pahami.`
-              }
-          ]);
-      }
-  }, [showAIHelp, module.title]);
-
   // Auto-scroll chat
   useEffect(() => {
       chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -127,13 +114,7 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
   };
 
   const resetChat = () => {
-      setChatHistory([
-          {
-              id: Date.now().toString(),
-              role: 'ai',
-              text: `Halo! Saya Tutor AI untuk materi "${module.title}". Silakan tanyakan apa saja yang belum kamu pahami.`
-          }
-      ]);
+      setChatHistory([]);
   };
 
   // Check Schedule Validity
@@ -498,7 +479,7 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
 
       {/* AI Chat Drawer - CHAT UI */}
       {showAIHelp && (
-        <div className="bg-slate-50 border-t border-slate-200 flex flex-col h-96 animate-in slide-in-from-bottom-5 duration-300">
+        <div className="bg-slate-100 border-t border-slate-200 flex flex-col h-96 animate-in slide-in-from-bottom-5 duration-300">
           
           {/* Header Chat */}
           <div className="flex items-center justify-between px-4 py-3 bg-white border-b border-slate-100 shadow-sm shrink-0">
@@ -507,47 +488,57 @@ const ModuleCard: React.FC<ModuleCardProps> = ({ module, role, onDelete, onQuizS
              </h4>
              <button 
                 onClick={resetChat} 
-                className="text-xs font-bold text-slate-400 hover:text-indigo-600 bg-slate-100 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
+                className="text-xs font-bold text-slate-400 hover:text-indigo-600 bg-slate-50 hover:bg-indigo-50 px-2 py-1 rounded transition-colors"
              >
                 Reset Chat
              </button>
           </div>
           
           {/* Chat Messages Area */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 scrollbar-thin">
-             {chatHistory.map((msg) => (
-                 <div key={msg.id} className={`flex gap-3 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
-                     
-                     {/* Avatar */}
-                     <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm ${
-                         msg.role === 'user' 
-                         ? 'bg-indigo-600 text-white' 
-                         : 'bg-white border border-slate-200 text-indigo-600'
-                     }`}>
-                         {msg.role === 'user' ? <User size={16}/> : <Bot size={16}/>}
-                     </div>
-
-                     {/* Bubble */}
-                     <div className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap ${
-                         msg.role === 'user' 
-                         ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none' 
-                         : 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-none'
-                     }`}>
-                         {msg.text}
-                     </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-100 scrollbar-thin">
+             {chatHistory.length === 0 && !isLoading ? (
+                 <div className="flex flex-col items-center justify-center h-full text-slate-400 p-8 text-center opacity-70">
+                    <div className="w-12 h-12 bg-white rounded-full flex items-center justify-center mb-3 shadow-sm">
+                        <Bot size={24} className="text-indigo-300"/>
+                    </div>
+                    <p className="text-sm font-medium text-slate-500">Mulai diskusi dengan Tutor AI</p>
+                    <p className="text-xs">Tanyakan apa saja tentang materi ini!</p>
                  </div>
-             ))}
+             ) : (
+                 chatHistory.map((msg) => (
+                     <div key={msg.id} className={`flex gap-3 animate-in fade-in slide-in-from-bottom-2 ${msg.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                         
+                         {/* Avatar */}
+                         <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm border ${
+                             msg.role === 'user' 
+                             ? 'bg-indigo-600 text-white border-indigo-600' 
+                             : 'bg-white border-slate-200 text-indigo-600'
+                         }`}>
+                             {msg.role === 'user' ? <User size={16}/> : <Bot size={16}/>}
+                         </div>
+
+                         {/* Bubble */}
+                         <div className={`max-w-[85%] px-4 py-3 text-sm leading-relaxed shadow-sm whitespace-pre-wrap ${
+                             msg.role === 'user' 
+                             ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-none' 
+                             : 'bg-white border border-slate-200 text-slate-700 rounded-2xl rounded-tl-none'
+                         }`}>
+                             {msg.text}
+                         </div>
+                     </div>
+                 ))
+             )}
 
              {/* Loading Bubble */}
              {isLoading && (
-                 <div className="flex gap-3">
+                 <div className="flex gap-3 animate-pulse">
                      <div className="w-8 h-8 rounded-full bg-white border border-slate-200 text-indigo-600 flex items-center justify-center shrink-0 shadow-sm">
                          <Bot size={16}/>
                      </div>
                      <div className="bg-white border border-slate-200 px-4 py-4 rounded-2xl rounded-tl-none shadow-sm flex items-center gap-1.5 w-fit">
-                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce"></div>
-                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-75"></div>
-                         <div className="w-2 h-2 bg-indigo-400 rounded-full animate-bounce delay-150"></div>
+                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce"></div>
+                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-75"></div>
+                         <div className="w-1.5 h-1.5 bg-indigo-400 rounded-full animate-bounce delay-150"></div>
                      </div>
                  </div>
              )}
