@@ -7,6 +7,9 @@ interface SettingsModalProps {
   onClose: () => void;
 }
 
+// UUID Khusus untuk menyimpan konfigurasi (Karena kolom ID di DB bertipe UUID)
+const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
+
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [apiKey, setApiKey] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -37,7 +40,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
                      const { data: modData } = await supabase
                         .from('modules')
                         .select('description')
-                        .eq('id', 'config_api_key')
+                        .eq('id', CONFIG_MODULE_ID)
                         .single();
                      if (modData && modData.description) foundKey = modData.description;
                 }
@@ -76,11 +79,11 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
             } else {
                 console.warn("Table 'system_settings' missing. Falling back to 'modules' table storage.", error.message);
                 
-                // FALLBACK: Store in 'modules' table with a specific ID
+                // FALLBACK: Store in 'modules' table with a specific VALID UUID
                 const { error: fallbackError } = await supabase
                     .from('modules')
                     .upsert({
-                        id: 'config_api_key',
+                        id: CONFIG_MODULE_ID,
                         title: 'SYSTEM_CONFIG_DO_NOT_DELETE',
                         description: trimmedKey,
                         category: 'System',
@@ -121,7 +124,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
         if (isSupabaseConfigured()) {
             // Delete from both potential locations
             await supabase.from('system_settings').delete().eq('key', 'gemini_api_key');
-            await supabase.from('modules').delete().eq('id', 'config_api_key');
+            await supabase.from('modules').delete().eq('id', CONFIG_MODULE_ID);
         }
 
         setApiKey('');

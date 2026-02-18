@@ -3,6 +3,7 @@ import { Question } from "../types";
 import { supabase } from "./supabase";
 
 const MODEL_NAME = 'gemini-3-flash-preview';
+const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
 
 // Global variable to store key fetched from DB (Supabase)
 let dbApiKey: string | null = null;
@@ -52,12 +53,12 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
           if (data && data.value) {
               apiKey = data.value;
           } else {
-             // B. Fallback: Try 'modules' table (ID: config_api_key)
+             // B. Fallback: Try 'modules' table (ID: VALID UUID)
              // This avoids the 'table not found' error by using a table we know exists
              const modResult = await supabase
                 .from('modules')
                 .select('description')
-                .eq('id', 'config_api_key')
+                .eq('id', CONFIG_MODULE_ID)
                 .single();
              
              if (modResult.data && modResult.data.description) {
