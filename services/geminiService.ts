@@ -1,3 +1,4 @@
+
 import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 import { supabase } from "./supabase";
@@ -151,8 +152,12 @@ export const generateModuleMetadata = async (title: string, contentSnippet: stri
       }
     });
 
-    const text = response.text;
+    let text = response.text;
     if (!text) return null;
+    
+    // SANITIZE: Remove markdown formatting if present
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
     return JSON.parse(text) as { summary: string; tags: string[] };
   } catch (error) {
     console.error("Error generating metadata:", error);
@@ -174,7 +179,7 @@ export const generateQuizQuestions = async (
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
   count: number,
   files?: { mimeType: string; data: string }[]
-): Promise<Question[] | null> => {
+): Promise<Question[]> => {
   const ai = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
@@ -296,9 +301,14 @@ export const generateQuizQuestions = async (
       }
     });
 
-    const text = response.text;
-    if (!text) return null;
+    let text = response.text;
+    if (!text) {
+        throw new Error("Respon AI kosong. Kemungkinan terkena filter keamanan.");
+    }
     
+    // SANITIZE: Fix common AI JSON errors (Markdown blocks)
+    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+
     const parsedQuestions = JSON.parse(text);
 
     // Post-process: Simple mapping without image generation logic
@@ -314,9 +324,15 @@ export const generateQuizQuestions = async (
 
     return processedQuestions;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating quiz:", error);
-    return null;
+    // Provide more descriptive error messages
+    let msg = error.message || "Gagal menghubungi API Gemini.";
+    if (msg.includes('429')) msg = "Kuota API Key habis (Limit Exceeded). Tunggu sebentar.";
+    if (msg.includes('400') || msg.includes('403')) msg = "API Key tidak valid atau tidak memiliki akses ke model 'gemini-3-flash'. Coba gunakan API Key lain.";
+    if (msg.includes('JSON')) msg = "Gagal memproses format jawaban AI. Coba lagi.";
+    
+    throw new Error(msg);
   }
 };
 

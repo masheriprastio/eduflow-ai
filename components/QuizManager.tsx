@@ -191,11 +191,13 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
             saveToModule(updatedList); // Auto-save AI questions
             showToast(`${newQuestions.length} soal AI (dari ${filesToUpload.length > 0 ? 'Dokumen PDF' : 'Teks Ringkasan'}) berhasil ditambahkan!`);
         } else {
-            alert("Gagal membuat soal. Pastikan API Key valid atau kurangi jumlah soal.");
+             // Fallback if empty array returned (unlikely with new error throwing)
+            alert("AI tidak menghasilkan soal.");
         }
-    } catch (e) {
+    } catch (e: any) {
         console.error(e);
-        alert("Terjadi kesalahan saat menghubungi AI.");
+        // Show the specific error message thrown by service
+        alert(`Gagal membuat soal: ${e.message}`);
     } finally {
         setIsGeneratingAi(false);
     }
