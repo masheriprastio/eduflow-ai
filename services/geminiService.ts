@@ -1,4 +1,3 @@
-
 import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 import { supabase } from "./supabase";
@@ -14,7 +13,7 @@ export const setGlobalApiKey = (key: string) => {
   dbApiKey = key;
 };
 
-// Helper aman untuk membaca Environment Variables
+// Helper aman untuk membaca Environment Variables (Duplikasi agar tidak ada dependensi silang)
 const getEnv = (key: string, fallbackKey?: string): string => {
   let value = '';
   try {
@@ -35,13 +34,18 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 };
 
 // Helper to get AI client safely inside functions
+// Returns NULL if no key is found (triggering Mock Mode)
+// NOW ASYNC to allow fetching from DB if cache is empty
 const getAiClient = async (): Promise<GoogleGenAI | null> => {
+  // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin - Cache In-Memory)
   let apiKey = dbApiKey || '';
 
+  // 2. Jika Cache kosong, coba fetch langsung dari Supabase
+  // STRATEGY: Try 'system_settings' first (Clean way), then fallback to 'modules' (Hacky way)
   if (!apiKey) {
       try {
           // A. Try standard system_settings
-          let { data } = await supabase
+          let { data, error } = await supabase
             .from('system_settings')
             .select('value')
             .eq('key', 'gemini_api_key')
@@ -51,13 +55,15 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
               apiKey = data.value;
           } else {
              // B. Fallback: Try 'modules' table
+             // Attempt 1: Fetch by Specific ID (Most common case)
              let modResult = await supabase
                 .from('modules')
                 .select('description')
                 .eq('id', CONFIG_MODULE_ID)
                 .single();
              
-             if (!modResult.data) {
+             // Attempt 2: Fetch by Title (If ID somehow changed/generated randomly)
+             if (!modResult.data || !modResult.data.description) {
                  modResult = await supabase
                     .from('modules')
                     .select('description')
@@ -71,22 +77,31 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
              }
           }
 
-          if (apiKey) setGlobalApiKey(apiKey);
+          if (apiKey) {
+              setGlobalApiKey(apiKey);
+              console.log("Global API Key fetched successfully.");
+          }
 
-      } catch (err) {}
+      } catch (err) {
+          // Silent fail
+      }
   }
 
+  // 3. Coba ambil dari Local Storage (Fallback input manual per device)
   try {
       if (!apiKey && typeof window !== 'undefined') {
           apiKey = localStorage.getItem('USER_API_KEY') || '';
       }
   } catch (e) {}
 
+  // 4. Jika tidak ada, coba Environment Variables
   if (!apiKey) {
       apiKey = getEnv('VITE_API_KEY', 'REACT_APP_API_KEY') || getEnv('API_KEY');
   }
   
+  // 5. Validasi
   if (!apiKey || apiKey === 'dummy-key') {
+      console.warn("Gemini API Key missing! Using Mock Mode.");
       return null;
   }
   
@@ -95,7 +110,7 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
 
 // --- MOCK GENERATORS (FALLBACKS) ---
 
-const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1000));
+const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1500));
 
 /**
  * Generates a summary and tags for a learning module.
@@ -103,40 +118,49 @@ const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1000));
 export const generateModuleMetadata = async (title: string, contentSnippet: string) => {
   const ai = await getAiClient();
 
+  // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
     await mockDelay();
     return {
-      summary: `(Mode Demo AI) Ini adalah ringkasan otomatis simulasi untuk materi "${title}".`,
-      tags: ["Demo", "Belajar", "Simulasi"]
+      summary: `(Mode Demo AI) Ini adalah ringkasan otomatis simulasi untuk materi "${title}". Masukkan API Key di menu Pengaturan (ikon gerigi) untuk hasil nyata.`,
+      tags: ["Demo", "Belajar", "Simulasi", "Materi"]
     };
   }
 
   try {
     const prompt = `
-      Saya mengunggah materi: "${title}".
-      Konteks: "${contentSnippet}".
-      
-      Buatkan:
-      1. Ringkasan menarik (maks 2 kalimat).
-      2. 3-5 tags relevan.
+      Saya adalah seorang Admin di sistem pembelajaran. Saya baru saja mengunggah materi dengan judul: "${title}".
+      Konteks atau isi singkatnya adalah: "${contentSnippet}".
 
-      Output JSON:
-      { "summary": "string", "tags": ["string"] }
+      Tolong buatkan:
+      1. Ringkasan menarik (maksimal 2 kalimat) untuk siswa.
+      2. 3-5 tags yang relevan.
+
+      Berikan output dalam format JSON:
+      {
+        "summary": "string",
+        "tags": ["string", "string"]
+      }
     `;
 
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: prompt,
-      config: { responseMimeType: "application/json" }
+      config: {
+        responseMimeType: "application/json",
+      }
     });
 
-    let text = response.text || "{}";
-    text = text.replace(/```json/g, '').replace(/```/g, '').trim();
-
+    const text = response.text;
+    if (!text) return null;
     return JSON.parse(text) as { summary: string; tags: string[] };
   } catch (error) {
-    console.error("Metadata error:", error);
-    return { summary: "Ringkasan manual (AI sibuk).", tags: ["Manual"] };
+    console.error("Error generating metadata:", error);
+    // Fallback on error
+    return {
+       summary: "Gagal menghasilkan ringkasan AI. Pastikan API Key valid dan koneksi stabil.",
+       tags: ["Manual", "Error"]
+    };
   }
 };
 
@@ -150,86 +174,149 @@ export const generateQuizQuestions = async (
   difficulty: 'HOTS' | 'BASIC' | 'MIX',
   count: number,
   files?: { mimeType: string; data: string }[]
-): Promise<Question[]> => {
+): Promise<Question[] | null> => {
   const ai = await getAiClient();
 
-  // MOCK MODE
+  // MOCK MODE (Jika API Key tidak ada)
   if (!ai) {
     await mockDelay();
-    return Array.from({ length: count }).map((_, i) => ({
-      id: `mock-${i}`,
-      type,
-      question: `(Demo) Pertanyaan simulasi ke-${i+1} tentang ${title}?`,
-      options: type === 'MULTIPLE_CHOICE' ? ["Opsi A", "Opsi B", "Opsi C", "Opsi D"] : undefined,
-      correctAnswer: type === 'MULTIPLE_CHOICE' ? "Opsi A" : "Kunci jawaban simulasi"
+    const mockQuestions: Question[] = Array.from({ length: count }).map((_, i) => ({
+      id: `mock-q-${Date.now()}-${i}`,
+      type: type,
+      question: `(Soal Demo AI ${i+1}) Jelaskan konsep dasar dari materi ${title}? [Mode Simulasi - Input API Key untuk Soal Nyata]`,
+      options: type === 'MULTIPLE_CHOICE' ? [
+        "Jawaban Benar (Pilihan A)",
+        "Pengecoh 1 (Pilihan B)",
+        "Pengecoh 2 (Pilihan C)",
+        "Pengecoh 3 (Pilihan D)"
+      ] : undefined,
+      correctAnswer: type === 'MULTIPLE_CHOICE' ? "Jawaban Benar (Pilihan A)" : "Ini adalah kunci jawaban simulasi untuk soal esai."
     }));
+    return mockQuestions;
   }
 
   try {
-    let formatInstruction = type === 'MULTIPLE_CHOICE' 
-      ? `Format JSON: [{"id": "uuid", "type": "MULTIPLE_CHOICE", "question": "...", "options": ["A","B","C","D"], "correctAnswer": "A"}]`
-      : `Format JSON: [{"id": "uuid", "type": "ESSAY", "question": "...", "correctAnswer": "..."}]`;
+    let formatInstruction = "";
+    
+    if (type === 'MULTIPLE_CHOICE') {
+      formatInstruction = `
+        Format JSON (Array of Objects):
+        [
+          {
+            "id": "generate_unique_id_here",
+            "type": "MULTIPLE_CHOICE",
+            "question": "Pertanyaan yang jelas dan spesifik?",
+            "options": ["Jawaban Benar", "Pengecoh Masuk Akal 1", "Pengecoh Masuk Akal 2", "Pengecoh Masuk Akal 3"],
+            "correctAnswer": "Jawaban Benar"
+          }
+        ]
+        ATURAN OPSI JAWABAN:
+        1. "options" HARUS berisi 4 string.
+        2. Opsi jawaban harus HOMOGEN (sejenis) dan panjang kalimatnya seimbang.
+        3. Pengecoh (distractor) HARUS relevan dengan topik "${title}", jangan gunakan jawaban yang konyol atau jelas salah bagi orang awam.
+        4. Jangan gunakan "Semua Benar" atau "Semua Salah" kecuali sangat diperlukan.
+      `;
+    } else {
+      formatInstruction = `
+        Format JSON (Array of Objects):
+        [
+          {
+            "id": "generate_unique_id_here",
+            "type": "ESSAY",
+            "question": "Pertanyaan?",
+            "correctAnswer": "Rubrik penilaian/poin kunci jawaban."
+          }
+        ]
+      `;
+    }
+
+    // Determine Difficulty Instruction
+    let difficultyPrompt = "";
+    if (difficulty === 'HOTS') {
+        difficultyPrompt = `
+        LEVEL: SULIT / HOTS (Higher Order Thinking Skills).
+        - Soal harus berbasis ANALISIS kasus, EVALUASI data, atau MENYIMPULKAN.
+        - Hindari pertanyaan "Apa itu..." atau "Sebutkan...".
+        - Berikan konteks/skenario sebelum pertanyaan jika memungkinkan.
+        `;
+    } else if (difficulty === 'BASIC') {
+        difficultyPrompt = `
+        LEVEL: MUDAH / BASIC.
+        - Fokus pada ingatan (recall) definisi, istilah, atau fakta dasar dari materi.
+        - Bahasa langsung dan mudah dipahami.
+        `;
+    } else {
+        // MIX
+        difficultyPrompt = `
+        LEVEL: CAMPURAN (Mixed).
+        - Buat variasi antara soal definisi dasar dan soal analisis.
+        `;
+    }
 
     const promptText = `
-      Topik: "${title}"
-      Konteks: "${contentContext}"
+      Bertindaklah sebagai Guru Ahli Pembuat Soal Ujian.
       
-      Buat ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai'} level ${difficulty}.
-      Bahasa Indonesia.
+      TOPIK UTAMA: "${title}"
+      
+      BAHAN SUMBER (CONTEXT):
+      "${contentContext}"
+
+      INSTRUKSI:
+      Buatkan ${count} soal ${type === 'MULTIPLE_CHOICE' ? 'Pilihan Ganda' : 'Esai/Uraian'} berdasarkan BAHAN SUMBER di atas (dan dokumen/gambar jika dilampirkan).
+      
+      PENTING:
+      1. Jika Bahan Sumber sangat singkat, gunakan pengetahuan umum Anda yang VALID tentang topik "${title}" untuk memperkaya soal, NAMUN tetap relevan.
+      2. Jangan membuat soal yang jawabannya tidak bisa ditemukan atau disimpulkan dari logika topik tersebut.
+      3. Bahasa Indonesia formal dan akademis.
+
+      ${difficultyPrompt}
+
       ${formatInstruction}
     `;
 
-    let responseText = "";
-
-    // 1. Try Primary Method (With Files if available)
-    try {
-        const parts: any[] = [];
-        if (files && files.length > 0) {
-            files.forEach(f => {
-                parts.push({ inlineData: { mimeType: f.mimeType, data: f.data } });
-            });
-        }
-        parts.push({ text: promptText });
-
-        const result = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: { parts },
-            config: { responseMimeType: "application/json" }
+    const parts: any[] = [];
+    if (files && files.length > 0) {
+      files.forEach(f => {
+        parts.push({
+            inlineData: {
+                mimeType: f.mimeType,
+                data: f.data
+            }
         });
-        responseText = result.text || "";
-
-    } catch (e: any) {
-        // 2. Immediate Fallback to Text-Only (Jika error quota/limit/file size)
-        console.warn("Primary generation failed. Switching to Text-Only mode.");
-        
-        // Hapus file dari request, hanya kirim text prompt
-        const result = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: promptText, 
-            config: { responseMimeType: "application/json" }
-        });
-        responseText = result.text || "";
+      });
     }
+    parts.push({ text: promptText });
 
-    if (!responseText) throw new Error("Empty response");
+    const response = await ai.models.generateContent({
+      model: MODEL_NAME,
+      contents: { parts },
+      config: {
+        responseMimeType: "application/json",
+        temperature: 0.5, // Lower temperature to be more deterministic/relevant
+      }
+    });
 
-    // Sanitize & Parse
-    responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
-    const parsed = JSON.parse(responseText);
+    const text = response.text;
+    if (!text) return null;
+    
+    const parsedQuestions = JSON.parse(text);
 
-    return parsed.map((q: any) => ({
-        id: q.id || `gen-${Math.random().toString(36).substr(2, 9)}`,
-        type: q.type,
-        question: q.question,
-        options: q.options,
-        correctAnswer: q.correctAnswer
-    }));
+    // Post-process: Simple mapping without image generation logic
+    const processedQuestions = parsedQuestions.map((q: any) => {
+        return {
+            id: q.id || `gen-${Date.now()}-${Math.random()}`,
+            type: q.type,
+            question: q.question,
+            options: q.options,
+            correctAnswer: q.correctAnswer
+        } as Question;
+    });
 
-  } catch (error: any) {
-    console.error("Quiz gen error:", error);
-    let msg = "Gagal membuat soal.";
-    if (error.message.includes('429')) msg = "Limit API tercapai. Mohon tunggu sebentar sebelum mencoba lagi.";
-    throw new Error(msg);
+    return processedQuestions;
+
+  } catch (error) {
+    console.error("Error generating quiz:", error);
+    return null;
   }
 };
 
@@ -238,16 +325,30 @@ export const generateQuizQuestions = async (
  */
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
   const ai = await getAiClient();
-  if (!ai) return "Fitur tanya jawab belum aktif (API Key missing).";
+
+  // MOCK MODE (Jika API Key tidak ada)
+  if (!ai) {
+    await mockDelay();
+    return `(Tutor AI Demo) Halo! Sepertinya Admin/Guru belum mengonfigurasi API Key di sistem. Harap hubungi guru Anda agar saya bisa aktif.`;
+  }
 
   try {
-    const prompt = `Tutor AI. Topik: ${moduleTitle}. Konteks: ${moduleContext}. Pertanyaan: ${question}. Jawab singkat jelas.`;
+    const prompt = `
+      Anda adalah tutor AI yang ramah dan pintar.
+      Konteks modul: "${moduleTitle}" - "${moduleContext}".
+      Pertanyaan Siswa: "${question}"
+      
+      Jawablah dengan bahasa Indonesia yang mudah dimengerti siswa. Maksimal 3 paragraf pendek.
+    `;
+
     const response = await ai.models.generateContent({
       model: MODEL_NAME,
       contents: prompt,
     });
+
     return response.text;
   } catch (error) {
-    return "Maaf, AI sedang sibuk. Coba lagi nanti.";
+    console.error("Error asking Gemini:", error);
+    return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya (Mungkin API Key tidak valid atau kuota habis). Coba cek pengaturan key Anda.";
   }
 };
