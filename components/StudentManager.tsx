@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useRef } from 'react';
 import { Student, LearningModule, ClassGroup } from '../types';
 import { X, UserPlus, Trash2, ShieldCheck, Search, Pencil, Save, RotateCcw, User, List, Plus, Download, Filter, Upload, FileSpreadsheet, Eye, BookOpen, Users, GraduationCap, LayoutGrid, Tag, PlusCircle, CheckSquare, Square, EyeOff, Check, Lock } from 'lucide-react';
@@ -62,7 +63,8 @@ const StudentManager: React.FC<StudentManagerProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filteredStudents = useMemo(() => {
-    return students.filter(s => {
+    // FIX: Guard against undefined students array
+    return (students || []).filter(s => {
         const matchesSearch = s.name.toLowerCase().includes(search.toLowerCase()) || s.nis.includes(search);
         
         let matchesClass = true;
@@ -163,7 +165,7 @@ const StudentManager: React.FC<StudentManagerProps> = ({
           onUpdateClasses(classes.filter(c => c.id !== id));
           
           // Update affected students: Remove deleted class from their list
-          students.forEach(s => {
+          (students || []).forEach(s => {
               if (s.classes?.includes(classToDelete.name)) {
                   onUpdateStudent({ 
                       ...s, 
@@ -539,7 +541,8 @@ const StudentManager: React.FC<StudentManagerProps> = ({
                             ) : (
                                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                                     {classes.map(cls => {
-                                        const studentCount = students.filter(s => s.classes?.includes(cls.name)).length;
+                                        // FIX: Guard against undefined students array
+                                        const studentCount = (students || []).filter(s => s.classes?.includes(cls.name)).length;
                                         
                                         return (
                                             <div key={cls.id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow relative group">

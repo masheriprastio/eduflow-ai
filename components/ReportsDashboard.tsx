@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { QuizResult, Student, ManualGrade, LearningModule } from '../types';
 import { X, BarChart3, Activity, Users, FileCheck, Clock, Monitor, Search, TrendingUp, Circle, Eye, Printer, Save, ChevronLeft, Loader2, Calculator, Plus, Pencil, Trash2, Edit, AlertCircle, Check, Unlock, Lock } from 'lucide-react';
@@ -59,12 +60,14 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
   }, []);
 
   // Filter Logic
-  const filteredStudents = useMemo(() => students.filter(s => 
+  // FIX: Guard students array
+  const filteredStudents = useMemo(() => (students || []).filter(s => 
     s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
     s.nis.includes(searchQuery)
   ), [students, searchQuery]);
 
-  const filteredResults = quizResults.filter(r => 
+  // FIX: Guard quizResults array
+  const filteredResults = (quizResults || []).filter(r => 
     r.studentName.toLowerCase().includes(searchQuery.toLowerCase()) || 
     r.moduleTitle.toLowerCase().includes(searchQuery.toLowerCase())
   ).sort((a, b) => new Date(b.submittedAt).getTime() - new Date(a.submittedAt).getTime());
@@ -79,15 +82,16 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
   // --- GRADING CALCULATION LOGIC ---
   const studentGrades = useMemo(() => {
     return filteredStudents.map(student => {
+        // FIX: Guard quizResults and manualGrades
         // 1. Calculate Average Quiz Score (Nilai Ujian Harian)
-        const studentQuizzes = quizResults.filter(r => r.studentNis === student.nis);
+        const studentQuizzes = (quizResults || []).filter(r => r.studentNis === student.nis);
         // Exclude disqualified scores (0) from average? Usually counted as 0. 
         // We include them as 0 to penalize.
         const quizSum = studentQuizzes.reduce((acc, curr) => acc + curr.score, 0);
         const quizAvg = studentQuizzes.length > 0 ? Math.round(quizSum / studentQuizzes.length) : 0;
 
         // 2. Calculate Average Manual Grade (Nilai Harian - PR/Tugas)
-        const studentManuals = manualGrades.filter(g => g.studentNis === student.nis);
+        const studentManuals = (manualGrades || []).filter(g => g.studentNis === student.nis);
         const manualSum = studentManuals.reduce((acc, curr) => acc + curr.score, 0);
         const manualAvg = studentManuals.length > 0 ? Math.round(manualSum / studentManuals.length) : 0;
 
@@ -111,11 +115,12 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
   if (!isOpen) return null;
 
   // Statistics
-  const totalQuizzesTaken = quizResults.length;
+  // FIX: Safe access
+  const totalQuizzesTaken = (quizResults || []).length;
   const averageScore = totalQuizzesTaken > 0 
-    ? Math.round(quizResults.reduce((acc, curr) => acc + curr.score, 0) / totalQuizzesTaken) 
+    ? Math.round((quizResults || []).reduce((acc, curr) => acc + curr.score, 0) / totalQuizzesTaken) 
     : 0;
-  const onlineStudentsCount = students.filter(s => isUserOnline(s.lastLogin)).length;
+  const onlineStudentsCount = (students || []).filter(s => isUserOnline(s.lastLogin)).length;
 
   const handleScoreChange = (questionIndex: number, newScoreStr: string) => {
     if (!selectedResult) return;
@@ -145,7 +150,8 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
       e.preventDefault();
       if (!manualNis || !selectedModuleId || !manualScore) return;
       
-      const selectedModule = modules.find(m => m.id === selectedModuleId);
+      // FIX: Guard modules
+      const selectedModule = (modules || []).find(m => m.id === selectedModuleId);
       if (!selectedModule) return;
 
       const newGrade: ManualGrade = {
@@ -169,7 +175,7 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
 
   const handleUpdateEditingGrade = () => {
       if(!editingGrade || !onUpdateManualGrade) return;
-      const selectedModule = modules.find(m => m.id === editingGrade.moduleId);
+      const selectedModule = (modules || []).find(m => m.id === editingGrade.moduleId);
       const updatedGrade = {
           ...editingGrade,
           title: selectedModule ? `Tugas: ${selectedModule.title}` : editingGrade.title
@@ -436,7 +442,7 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
                         </div>
                         <div>
                             <p className="text-xs text-slate-500 font-bold uppercase tracking-wider">Sedang Online</p>
-                            <h3 className="text-2xl font-bold text-slate-800">{onlineStudentsCount} <span className="text-sm font-normal text-slate-400">/ {students.length} Siswa</span></h3>
+                            <h3 className="text-2xl font-bold text-slate-800">{onlineStudentsCount} <span className="text-sm font-normal text-slate-400">/ {(students || []).length} Siswa</span></h3>
                         </div>
                     </div>
                 </div>
@@ -517,7 +523,7 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
                                                  required
                                              >
                                                  <option value="">-- Pilih Siswa --</option>
-                                                 {students.map(s => (
+                                                 {(students || []).map(s => (
                                                      <option key={s.nis} value={s.nis}>{s.name} ({s.classes?.join(', ') || 'Umum'})</option>
                                                  ))}
                                              </select>
@@ -531,7 +537,7 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
                                                  required
                                              >
                                                  <option value="">-- Pilih Materi Penugasan --</option>
-                                                 {modules.map(m => (
+                                                 {(modules || []).map(m => (
                                                      <option key={m.id} value={m.id}>{m.title}</option>
                                                  ))}
                                              </select>
@@ -820,12 +826,12 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
                 
                 <div className="p-6 overflow-y-auto bg-slate-50 flex-1">
                     <div className="max-w-4xl mx-auto space-y-4">
-                        {manualGrades.filter(g => g.studentNis === studentForDetails.nis).length === 0 ? (
+                        {(manualGrades || []).filter(g => g.studentNis === studentForDetails.nis).length === 0 ? (
                             <div className="text-center py-10 bg-white rounded-xl border border-dashed border-slate-300">
                                 <p className="text-slate-500">Belum ada nilai harian untuk siswa ini.</p>
                             </div>
                         ) : (
-                            manualGrades.filter(g => g.studentNis === studentForDetails.nis).map(grade => (
+                            (manualGrades || []).filter(g => g.studentNis === studentForDetails.nis).map(grade => (
                                 <div key={grade.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between group">
                                     {editingGrade?.id === grade.id ? (
                                         <div className="flex-1 flex gap-3 items-end">
@@ -836,7 +842,7 @@ const ReportsDashboard: React.FC<ReportsDashboardProps> = ({
                                                     onChange={e => setEditingGrade({...editingGrade, moduleId: e.target.value})}
                                                     className="w-full p-2 text-sm border border-slate-300 rounded-lg"
                                                 >
-                                                    {modules.map(m => (
+                                                    {(modules || []).map(m => (
                                                         <option key={m.id} value={m.id}>{m.title}</option>
                                                     ))}
                                                 </select>

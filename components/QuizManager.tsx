@@ -54,7 +54,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   // Load module data when selected
   useEffect(() => {
     if (selectedModuleId) {
-        const module = modules.find(m => m.id === selectedModuleId);
+        // FIX: Guard modules
+        const module = (modules || []).find(m => m.id === selectedModuleId);
         if (module) {
             setQuestions(module.quiz?.questions || []);
             setQuizTitle(module.quiz?.title || `Kuis: ${module.title}`);
@@ -69,7 +70,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
             setShowList(false); // On mobile, move to detail view
         }
     }
-  }, [selectedModuleId]); 
+  }, [selectedModuleId, modules]); // Added modules dependency
 
   if (!isOpen) return null;
 
@@ -81,7 +82,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   // Helper to sync changes to parent immediately
   const saveToModule = (updatedQuestions: Question[]) => {
     if (!selectedModuleId) return;
-    const module = modules.find(m => m.id === selectedModuleId);
+    const module = (modules || []).find(m => m.id === selectedModuleId);
     if (!module) return;
 
     const updatedModule: LearningModule = {
@@ -107,7 +108,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
   const handleDeleteQuiz = () => {
       if (!selectedModuleId) return;
       if (confirm("Yakin ingin menghapus seluruh data kuis ini? Semua soal akan hilang.")) {
-          const module = modules.find(m => m.id === selectedModuleId);
+          const module = (modules || []).find(m => m.id === selectedModuleId);
           if (!module) return;
           
           onUpdateModule({ ...module, quiz: undefined });
@@ -144,7 +145,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
     setIsGeneratingAi(true);
     
     // Combine context from ALL selected modules
-    const sourceModules = modules.filter(m => selectedSourceModules.includes(m.id));
+    // FIX: Guard modules
+    const sourceModules = (modules || []).filter(m => selectedSourceModules.includes(m.id));
     const combinedTitles = sourceModules.map(m => m.title).join(', ');
     
     let combinedContext = `Gabungan Materi dari: ${combinedTitles}.\n\n`;
@@ -384,7 +386,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                     <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider">Pilih Kuis Materi</h3>
                 </div>
                 <div className="overflow-y-auto flex-1 p-2 space-y-2">
-                    {modules.map(m => (
+                    {/* FIX: Guard modules array */}
+                    {(modules || []).map(m => (
                         <button
                             key={m.id}
                             onClick={() => setSelectedModuleId(m.id)}
@@ -539,7 +542,8 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
                                                 <Layers size={10}/> Materi Sumber (Centang untuk gabung)
                                             </label>
                                             <div className="max-h-24 overflow-y-auto grid grid-cols-1 sm:grid-cols-2 gap-2">
-                                                {modules.map(m => (
+                                                {/* FIX: Guard modules */}
+                                                {(modules || []).map(m => (
                                                     <label key={m.id} className="flex items-center gap-2 text-xs cursor-pointer hover:bg-white/10 p-1 rounded">
                                                         <input 
                                                             type="checkbox" 
