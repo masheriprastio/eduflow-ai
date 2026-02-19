@@ -179,38 +179,22 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
-    let responseText = "";
-
-    // TRY-CATCH BLOCK FOR FALLBACK
-    try {
-        const parts: any[] = [];
-        // Only add files if they exist
-        if (files && files.length > 0) {
-            files.forEach(f => {
-                parts.push({ inlineData: { mimeType: f.mimeType, data: f.data } });
-            });
-        }
-        parts.push({ text: promptText });
-
-        const result = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: { parts },
-            config: { responseMimeType: "application/json" }
+    const parts: any[] = [];
+    if (files && files.length > 0) {
+        files.forEach(f => {
+            parts.push({ inlineData: { mimeType: f.mimeType, data: f.data } });
         });
-        responseText = result.text || "";
-
-    } catch (e: any) {
-        // FALLBACK: If API fails (likely Limit or File too big), try Text-Only immediately
-        console.warn("Primary generation failed. Switching to Text-Only mode.");
-        
-        // Remove file parts, just send text prompt
-        const result = await ai.models.generateContent({
-            model: MODEL_NAME,
-            contents: promptText, 
-            config: { responseMimeType: "application/json" }
-        });
-        responseText = result.text || "";
     }
+    parts.push({ text: promptText });
+
+    // Direct call without complex retry logic
+    const result = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents: { parts },
+        config: { responseMimeType: "application/json" }
+    });
+    
+    let responseText = result.text || "";
 
     if (!responseText) throw new Error("Empty response");
 
@@ -228,9 +212,8 @@ export const generateQuizQuestions = async (
 
   } catch (error: any) {
     console.error("Quiz gen error:", error);
-    let msg = "Gagal membuat soal.";
-    if (error.message.includes('429')) msg = "Limit API tercapai. Mohon tunggu sebentar sebelum mencoba lagi.";
-    throw new Error(msg);
+    // Directly throw original error without limit check overrides
+    throw new Error(error.message || "Gagal membuat soal.");
   }
 };
 
