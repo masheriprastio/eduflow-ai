@@ -29,19 +29,12 @@ import {
   Database,
   Loader2,
   WifiOff,
-  Settings,
-  Lock,
-  Menu,
-  LayoutDashboard,
-  X
+  Settings
 } from 'lucide-react';
 
 // --- SUPABASE IMPORTS ---
 import { supabase, isSupabaseConfigured } from './services/supabase';
 import { setGlobalApiKey } from './services/geminiService';
-
-const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
-const CONFIG_MODULE_TITLE = 'SYSTEM_CONFIG_DO_NOT_DELETE';
 
 const App: React.FC = () => {
   const [role, setRole] = useState<Role>('GUEST');
@@ -83,27 +76,17 @@ const App: React.FC = () => {
               }
           };
 
-          // Helper to fetch system settings (API Key) - NOW USING MODULES TABLE FALLBACK
+          // Helper to fetch system settings (API Key)
           const fetchSettings = async () => {
               if (!isSupabaseConfigured()) return;
               try {
-                  // Attempt to fetch API Key from 'modules' table using specific ID or Title
-                  // We reuse the 'modules' table because 'system_settings' might not exist
-                  
-                  // Try explicit ID first
-                  let { data, error } = await supabase.from('modules').select('description').eq('id', CONFIG_MODULE_ID).single();
-                  
-                  // If not found by ID, try by Title (Fallback for auto-generated UUIDs)
-                  if (!data || error) {
-                      const titleResult = await supabase.from('modules').select('description').eq('title', CONFIG_MODULE_TITLE).limit(1).single();
-                      data = titleResult.data;
-                      error = titleResult.error;
-                  }
-
-                  if (data && data.description) {
-                      console.log("Global API Key loaded from database (Module Storage).");
-                      setGlobalApiKey(data.description);
+                  // Attempt to fetch API Key from 'system_settings' table
+                  const { data, error } = await supabase.from('system_settings').select('value').eq('key', 'gemini_api_key').single();
+                  if (data && data.value) {
+                      console.log("Global API Key loaded from database.");
+                      setGlobalApiKey(data.value);
                   } else if (error) {
+                      // Table might not exist, harmless in demo
                       console.debug("System settings not found or error:", error.message);
                   }
               } catch (e) {
@@ -192,11 +175,8 @@ const App: React.FC = () => {
   const [isChangePassOpen, setIsChangePassOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   
-  // Edit State
-  const [editingModule, setEditingModule] = useState<LearningModule | undefined>(undefined);
-
-  // Sidebar Mobile State
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+  // Dropdown Menu State
+  const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
 
   // DELETE CONFIRMATION STATE (Global)
   const [deleteConfirmation, setDeleteConfirmation] = useState<{
@@ -243,13 +223,8 @@ const App: React.FC = () => {
   const handleLogout = () => {
     setRole('GUEST');
     setCurrentUser(null);
-    setIsSidebarOpen(false);
+    setIsProfileMenuOpen(false);
     setActiveView('MODULES');
-    // Reset all modals
-    setIsStudentManagerOpen(false);
-    setIsQuizManagerOpen(false);
-    setIsReportsOpen(false);
-    setIsSettingsOpen(false);
   };
 
   const handleChangePassword = async (newPass: string) => {
@@ -274,31 +249,7 @@ const App: React.FC = () => {
       handleLogin('STUDENT', updatedUser);
   };
 
-  // Helper to close modals when navigating
-  const resetModals = () => {
-      setIsStudentManagerOpen(false);
-      setIsQuizManagerOpen(false);
-      setIsReportsOpen(false);
-      setIsSettingsOpen(false);
-      setIsChangePassOpen(false);
-      setIsSidebarOpen(false); // Close sidebar on mobile after click
-  };
-
   // --- CRUD HANDLERS WITH OFFLINE FALLBACK ---
-
-  // Unified Handler for Upload (Create) and Edit (Update)
-  const handleFormSubmit = async (data: Partial<LearningModule>) => {
-    // Check if it's an update (ID exists in payload or editingModule state)
-    if (data.id) {
-        const updatedModule = { ...editingModule, ...data } as LearningModule;
-        await handleUpdateModule(updatedModule);
-        setEditingModule(undefined); // Clear edit state
-    } else {
-        // Create new
-        await handleUpload(data);
-    }
-    setIsUploadOpen(false);
-  };
 
   const handleUpload = async (data: Partial<LearningModule>) => {
     const fallbackModule = { 
@@ -349,18 +300,9 @@ const App: React.FC = () => {
         const { id, ...updateData } = updatedModule;
         const { error } = await supabase.from('modules').update(updateData).eq('id', id);
         if (error) throw error;
-        
-        // Update local state immediately for responsiveness
+    } catch (e) {
+        // Local Update
         setModules(prev => prev.map(m => m.id === updatedModule.id ? updatedModule : m));
-    } catch (e: any) {
-        console.error("Update error:", e);
-        // Local Update Fallback
-        if (e.message === "Offline Mode") {
-             setModules(prev => prev.map(m => m.id === updatedModule.id ? updatedModule : m));
-             alert("⚠️ Mode Offline: Perubahan disimpan sementara.");
-        } else {
-             alert("Gagal menyimpan perubahan: " + e.message);
-        }
     }
   };
 
@@ -447,7 +389,13 @@ const App: React.FC = () => {
   };
 
   const handleUpdateClasses = (newClasses: ClassGroup[]) => {
+     // For simplicity in this demo, we just update local state. 
+     // A robust app would sync individual additions/deletions.
      setClasses(newClasses);
+     // If we were syncing, we'd need to loop and upsert/delete in Supabase.
+     // For now, rely on `StudentManager` effectively managing the list for UI, 
+     // and if online, `StudentManager` logic would need extension to properly sync DB.
+     // (The current StudentManager logic relies on parent state update)
   };
 
   // --- QUIZ & RESULTS HANDLERS ---
@@ -479,6 +427,9 @@ const App: React.FC = () => {
         }
         
         setQuizResults(prev => [resultData, ...prev]);
+        
+        // Show local feedback
+        // (ModuleCard already shows the result screen)
     } catch (e) {
         console.error("Submit quiz error", e);
         // Save locally fallback
@@ -563,15 +514,16 @@ const App: React.FC = () => {
   // --- RENDER HELPERS ---
 
   const filteredModules = useMemo(() => {
-    return modules.filter(m => {
-        // EXCLUDE SYSTEM CONFIG MODULE (STRICT CHECK)
-        if (m.id === CONFIG_MODULE_ID || m.title === CONFIG_MODULE_TITLE || m.tags?.includes('hidden')) return false;
-
+    // FIX: Add safe guard (modules || []) to prevent 'filter of undefined' error
+    return (modules || []).filter(m => {
         const matchesSearch = m.title.toLowerCase().includes(searchQuery.toLowerCase()) 
                             || m.tags.some(t => t.toLowerCase().includes(searchQuery.toLowerCase()));
         const matchesCategory = selectedCategory === 'All' || m.category === selectedCategory;
         
         // Student Access Control: 
+        // If student has classes assigned, they should only see:
+        // 1. Modules with NO targetClasses (Public)
+        // 2. Modules where targetClasses includes one of student's classes
         if (role === 'STUDENT' && currentUser) {
              const studentClasses = currentUser.classes || [];
              const isPublic = !m.targetClasses || m.targetClasses.length === 0;
@@ -594,307 +546,236 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="flex h-screen bg-slate-50 font-sans text-slate-900 overflow-hidden">
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-900 pb-20">
       
-      {/* --- LEFT SIDEBAR (PERSISTENT NAV FOR AUTH USERS) --- */}
-      {role !== 'GUEST' && (
-          <>
-            {/* Mobile Overlay */}
-            {isSidebarOpen && (
-                <div 
-                    className="fixed inset-0 bg-black/50 z-40 md:hidden transition-opacity"
-                    onClick={() => setIsSidebarOpen(false)}
-                />
-            )}
+      {/* NAVBAR */}
+      <nav className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between h-16">
+            
+            {/* Logo */}
+            <div className="flex items-center gap-3">
+              <div className="bg-indigo-600 text-white p-2 rounded-xl shadow-lg shadow-indigo-200">
+                <GraduationCap size={24} />
+              </div>
+              <div>
+                 <h1 className="text-xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600 tracking-tight">
+                    EduFlow AI
+                 </h1>
+                 <p className="text-[10px] text-slate-400 font-bold tracking-widest uppercase">Learning System</p>
+              </div>
+            </div>
 
-            {/* Sidebar Content */}
-            <aside className={`fixed md:relative inset-y-0 left-0 w-64 bg-slate-900 text-white z-50 flex flex-col transition-transform duration-300 transform ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} shadow-xl`}>
-                
-                {/* Brand */}
-                <div className="p-6 flex items-center gap-3 border-b border-slate-800">
-                    <div className="bg-indigo-600 p-2 rounded-lg">
-                        <GraduationCap size={24} className="text-white"/>
-                    </div>
-                    <div>
-                        <h1 className="font-bold text-lg tracking-tight">EduFlow AI</h1>
-                        <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Learning System</p>
-                    </div>
-                    <button 
-                        onClick={() => setIsSidebarOpen(false)} 
-                        className="md:hidden ml-auto text-slate-400 hover:text-white"
-                    >
-                        <X size={20} />
-                    </button>
-                </div>
+            {/* Actions */}
+            <div className="flex items-center gap-3">
+               {!isSupabaseConfigured() && (
+                   <div className="hidden md:flex items-center gap-1.5 px-3 py-1 bg-red-50 border border-red-100 rounded-full text-red-600 text-xs font-bold" title="Database tidak terhubung">
+                       <WifiOff size={12}/> Offline Mode
+                   </div>
+               )}
 
-                {/* Nav Links */}
-                <div className="flex-1 overflow-y-auto py-6 px-3 space-y-1">
-                    <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Menu Utama</p>
-                    
-                    <button 
-                        onClick={() => resetModals()}
-                        className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                    >
-                        <LayoutDashboard size={20} />
-                        Materi Pembelajaran
-                    </button>
+               {role === 'GUEST' ? (
+                 <button 
+                   onClick={() => setIsLoginOpen(true)}
+                   className="flex items-center gap-2 bg-slate-900 text-white px-5 py-2 rounded-full text-sm font-bold hover:bg-slate-800 transition-all shadow-md hover:shadow-lg active:scale-95"
+                 >
+                   <LogIn size={18} /> Masuk
+                 </button>
+               ) : (
+                 <div className="relative">
+                   <button 
+                      onClick={() => setIsProfileMenuOpen(!isProfileMenuOpen)}
+                      className="flex items-center gap-3 pl-3 pr-2 py-1.5 rounded-full border border-slate-200 hover:bg-slate-50 transition-all bg-white shadow-sm"
+                   >
+                     <div className="text-right hidden sm:block">
+                        <p className="text-xs font-bold text-slate-800">{currentUser?.name}</p>
+                        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">{role === 'ADMIN' ? 'Guru / Admin' : `Siswa ${currentUser?.classes?.[0] || ''}`}</p>
+                     </div>
+                     <div className="w-9 h-9 bg-gradient-to-br from-indigo-500 to-violet-500 rounded-full flex items-center justify-center text-white font-bold shadow-inner">
+                        {currentUser?.name?.charAt(0) || <UserCircle size={20}/>}
+                     </div>
+                     <ChevronDown size={14} className="text-slate-400 mr-1"/>
+                   </button>
 
-                    {role === 'ADMIN' && (
-                        <>
-                            <button 
-                                onClick={() => { resetModals(); setIsStudentManagerOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <Users size={20} />
-                                Kelola Siswa & Kelas
-                            </button>
-                            <button 
-                                onClick={() => { resetModals(); setIsQuizManagerOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <BrainCircuit size={20} />
-                                Bank Soal & Kuis
-                            </button>
-                            <button 
-                                onClick={() => { resetModals(); setIsReportsOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <BarChart3 size={20} />
-                                Laporan & Nilai
-                            </button>
-                            
-                            <div className="my-4 h-px bg-slate-800 mx-3"></div>
-                            <p className="px-3 text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Sistem</p>
-                            
-                            <button 
-                                onClick={() => { resetModals(); setIsSettingsOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <Settings size={20} />
-                                Pengaturan
-                            </button>
-                        </>
-                    )}
+                   {/* Dropdown Menu */}
+                   {isProfileMenuOpen && (
+                       <div className="absolute right-0 mt-2 w-56 bg-white rounded-xl shadow-xl border border-slate-100 py-2 animate-in fade-in slide-in-from-top-5 z-50">
+                           <div className="px-4 py-3 border-b border-slate-100 sm:hidden">
+                                <p className="text-sm font-bold text-slate-800">{currentUser?.name}</p>
+                                <p className="text-xs text-slate-500">{role}</p>
+                           </div>
+                           
+                           {role === 'ADMIN' && (
+                               <>
+                                   <button 
+                                      onClick={() => { setIsSettingsOpen(true); setIsProfileMenuOpen(false); }}
+                                      className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2"
+                                   >
+                                       <Settings size={16}/> Pengaturan Sistem
+                                   </button>
+                                   <button 
+                                      onClick={() => { setIsStudentManagerOpen(true); setIsProfileMenuOpen(false); }}
+                                      className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2"
+                                   >
+                                       <Users size={16}/> Kelola Siswa & Kelas
+                                   </button>
+                                   <button 
+                                      onClick={() => { setIsQuizManagerOpen(true); setIsProfileMenuOpen(false); }}
+                                      className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2"
+                                   >
+                                       <BrainCircuit size={16}/> Bank Soal & Kuis
+                                   </button>
+                                   <button 
+                                      onClick={() => { setIsReportsOpen(true); setIsProfileMenuOpen(false); }}
+                                      className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-indigo-50 hover:text-indigo-600 flex items-center gap-2"
+                                   >
+                                       <BarChart3 size={16}/> Laporan & Nilai
+                                   </button>
+                                   <div className="h-px bg-slate-100 my-2"></div>
+                               </>
+                           )}
 
-                    {role === 'STUDENT' && (
-                        <>
-                            <button 
-                                onClick={() => { resetModals(); setIsReportsOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <BarChart3 size={20} />
-                                Lihat Nilai Saya
-                            </button>
-                            <button 
-                                onClick={() => { resetModals(); setIsChangePassOpen(true); }}
-                                className="w-full flex items-center gap-3 px-3 py-3 rounded-xl text-sm font-medium text-slate-300 hover:bg-slate-800 hover:text-white transition-colors text-left"
-                            >
-                                <Settings size={20} />
-                                Ganti Password
-                            </button>
-                        </>
-                    )}
-                </div>
+                           <button 
+                              onClick={() => { setIsChangePassOpen(true); setIsProfileMenuOpen(false); }}
+                              className="w-full text-left px-4 py-2 text-sm text-slate-600 hover:bg-amber-50 hover:text-amber-600 flex items-center gap-2"
+                           >
+                               <Settings size={16}/> Ganti Password
+                           </button>
+                           
+                           <button 
+                              onClick={handleLogout}
+                              className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center gap-2"
+                           >
+                               <LogOut size={16}/> Keluar
+                           </button>
+                       </div>
+                   )}
+                 </div>
+               )}
+            </div>
+          </div>
+        </div>
+      </nav>
 
-                {/* User Profile Footer */}
-                <div className="p-4 bg-slate-950/50 border-t border-slate-800">
-                    <div className="flex items-center gap-3 mb-3">
-                        <div className="w-10 h-10 bg-indigo-500 rounded-full flex items-center justify-center text-white font-bold shadow-md">
-                            {currentUser?.name?.charAt(0) || <UserCircle size={20}/>}
-                        </div>
-                        <div className="flex-1 min-w-0">
-                            <p className="text-sm font-bold text-white truncate">{currentUser?.name}</p>
-                            <p className="text-xs text-slate-400 truncate capitalize">{role === 'ADMIN' ? 'Administrator' : 'Siswa'}</p>
-                        </div>
-                    </div>
-                    <button 
-                        onClick={handleLogout}
-                        className="w-full flex items-center justify-center gap-2 bg-red-600/10 text-red-400 hover:bg-red-600 hover:text-white py-2 rounded-lg text-xs font-bold transition-all"
-                    >
-                        <LogOut size={14} /> Keluar Aplikasi
-                    </button>
-                </div>
-            </aside>
-          </>
-      )}
-
-      {/* --- MAIN CONTENT AREA --- */}
-      <div className="flex-1 flex flex-col h-full overflow-hidden w-full">
+      {/* Main Content */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         
-        {/* Mobile Header (Only for Auth Users on Mobile) */}
-        {role !== 'GUEST' && (
-            <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 shrink-0">
-                <div className="flex items-center gap-3">
-                    <button onClick={() => setIsSidebarOpen(true)} className="text-slate-600 hover:text-slate-900">
-                        <Menu size={24} />
+        {/* Welcome Banner */}
+        {role === 'GUEST' ? (
+             <div className="bg-indigo-600 rounded-3xl p-8 md:p-12 mb-10 text-white relative overflow-hidden shadow-2xl shadow-indigo-200">
+                <div className="relative z-10 max-w-2xl">
+                    <span className="inline-block py-1 px-3 rounded-full bg-indigo-500/50 border border-indigo-400 backdrop-blur-md text-xs font-bold mb-4">
+                        Learning Management System v2.0
+                    </span>
+                    <h2 className="text-3xl md:text-5xl font-extrabold mb-6 leading-tight">
+                        Belajar Lebih Cerdas dengan <span className="text-yellow-300">Bantuan AI</span>
+                    </h2>
+                    <p className="text-indigo-100 text-lg mb-8 leading-relaxed">
+                        Akses ribuan materi pelajaran, latihan soal interaktif, dan dapatkan bimbingan langsung dari Tutor AI kapan saja.
+                    </p>
+                    <button 
+                        onClick={() => setIsLoginOpen(true)}
+                        className="bg-white text-indigo-600 px-8 py-4 rounded-xl font-bold text-lg hover:bg-indigo-50 transition-all shadow-lg active:scale-95 flex items-center gap-2"
+                    >
+                        Mulai Belajar Sekarang <ArrowRight size={20}/>
                     </button>
-                    <span className="font-bold text-lg text-slate-800">EduFlow AI</span>
                 </div>
-                <div className="flex items-center gap-2">
-                    {!isSupabaseConfigured() && (
-                        <WifiOff size={16} className="text-red-500"/>
-                    )}
-                </div>
+                
+                {/* Decoration Circles */}
+                <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-white/10 rounded-full blur-3xl"></div>
+                <div className="absolute bottom-0 right-20 w-60 h-60 bg-indigo-400/20 rounded-full blur-2xl"></div>
+             </div>
+        ) : (
+            <div className="mb-8">
+                <h2 className="text-2xl font-bold text-slate-800">Halo, {currentUser?.name} 👋</h2>
+                <p className="text-slate-500">Selamat datang kembali di dashboard pembelajaran.</p>
             </div>
         )}
 
-        {/* Scrollable Content */}
-        <main className="flex-1 overflow-y-auto bg-slate-50 p-4 md:p-8 scrollbar-hide">
+        {/* Filter Bar */}
+        <div className="flex flex-col md:flex-row gap-4 mb-8 sticky top-20 z-30 bg-slate-50/90 backdrop-blur-sm py-2">
+            <div className="relative flex-1">
+                <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
+                <input 
+                    type="text" 
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Cari materi pembelajaran..." 
+                    className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-700 transition-all"
+                />
+            </div>
             
-            {/* GUEST LANDING PAGE */}
-            {role === 'GUEST' ? (
-                <div className="min-h-full flex flex-col items-center justify-center text-center">
-                    <div className="w-full max-w-4xl px-6">
-                        <div className="bg-white rounded-3xl p-8 md:p-16 shadow-2xl border border-slate-100 relative overflow-hidden">
-                            
-                            {/* Background decoration */}
-                            <div className="absolute top-0 right-0 -mr-20 -mt-20 w-80 h-80 bg-indigo-50 rounded-full blur-3xl opacity-50"></div>
-                            <div className="absolute bottom-0 left-0 -ml-20 -mb-20 w-80 h-80 bg-purple-50 rounded-full blur-3xl opacity-50"></div>
+            <div className="flex gap-2 overflow-x-auto pb-2 md:pb-0 scrollbar-hide">
+                <button 
+                    onClick={() => setSelectedCategory('All')}
+                    className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedCategory === 'All' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
+                >
+                    Semua
+                </button>
+                {(Object.values(ModuleCategory) as string[]).map((cat) => (
+                    <button 
+                        key={cat}
+                        onClick={() => setSelectedCategory(cat)}
+                        className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedCategory === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
+                    >
+                        {cat}
+                    </button>
+                ))}
+            </div>
+        </div>
 
-                            <div className="relative z-10 flex flex-col items-center">
-                                <div className="bg-indigo-600 text-white p-4 rounded-2xl shadow-lg shadow-indigo-200 mb-8 transform hover:scale-110 transition-transform duration-500">
-                                    <GraduationCap size={48} />
-                                </div>
-                                
-                                <span className="inline-block py-1.5 px-4 rounded-full bg-indigo-50 border border-indigo-100 text-indigo-600 text-xs font-extrabold tracking-widest uppercase mb-6">
-                                    Learning Management System v2.0
-                                </span>
-                                
-                                <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 leading-tight tracking-tight">
-                                    Belajar Lebih Cerdas <br/>
-                                    dengan <span className="text-transparent bg-clip-text bg-gradient-to-r from-indigo-600 to-purple-600">Bantuan AI</span>
-                                </h1>
-                                
-                                <p className="text-slate-500 text-lg md:text-xl mb-10 max-w-2xl mx-auto leading-relaxed">
-                                    Platform pembelajaran modern dengan integrasi Tutor AI, bank soal otomatis, dan manajemen kelas yang efisien.
-                                </p>
-                                
-                                <button 
-                                    onClick={() => setIsLoginOpen(true)}
-                                    className="bg-slate-900 text-white px-10 py-4 rounded-2xl font-bold text-lg hover:bg-slate-800 transition-all shadow-xl hover:shadow-2xl hover:-translate-y-1 active:scale-95 flex items-center gap-3 group"
-                                >
-                                    <LogIn size={20} className="group-hover:translate-x-1 transition-transform"/> 
-                                    Masuk ke Aplikasi
-                                </button>
+        {/* Action Bar (Admin Only) */}
+        {role === 'ADMIN' && (
+            <div className="mb-8 flex justify-end">
+                <button 
+                    onClick={() => {
+                        setUploadTargetClass(undefined);
+                        setIsUploadOpen(true);
+                    }}
+                    className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-all hover:scale-105 active:scale-95"
+                >
+                    <PlusCircle size={20} />
+                    Upload Materi Baru
+                </button>
+            </div>
+        )}
 
-                                <div className="mt-12 flex items-center justify-center gap-8 opacity-60 grayscale hover:grayscale-0 transition-all duration-500">
-                                    {/* Mock logos or indicators */}
-                                    <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase tracking-widest">
-                                        <Database size={16}/> Supabase DB
-                                    </div>
-                                    <div className="h-4 w-px bg-slate-300"></div>
-                                    <div className="flex items-center gap-2 text-slate-400 font-bold text-xs uppercase tracking-widest">
-                                        <BrainCircuit size={16}/> Gemini AI
-                                    </div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
+        {/* Content Grid */}
+        {filteredModules.length > 0 ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {filteredModules.map((module) => (
+                    <ModuleCard 
+                        key={module.id} 
+                        module={module} 
+                        role={role}
+                        onDelete={handleDeleteModule}
+                        onQuizSubmit={handleQuizSubmit}
+                    />
+                ))}
+            </div>
+        ) : (
+            <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
+                <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                    <BookOpen size={40} />
                 </div>
-            ) : (
-                /* AUTHENTICATED DASHBOARD CONTENT */
-                <div className="max-w-7xl mx-auto">
-                    
-                    {/* Page Header */}
-                    <div className="mb-8">
-                        <h2 className="text-3xl font-bold text-slate-800">
-                            {role === 'ADMIN' ? 'Dashboard Guru' : 'Ruang Belajar'}
-                        </h2>
-                        <p className="text-slate-500">Selamat datang kembali, {currentUser?.name}.</p>
-                    </div>
+                <h3 className="text-xl font-bold text-slate-800 mb-2">Tidak ada materi ditemukan</h3>
+                <p className="text-slate-500 max-w-md mx-auto">
+                    {searchQuery || selectedCategory !== 'All' 
+                        ? 'Coba ubah kata kunci pencarian atau kategori filter Anda.' 
+                        : 'Belum ada materi yang diunggah oleh guru.'}
+                </p>
+                {(role === 'ADMIN' && !searchQuery) && (
+                    <button 
+                        onClick={() => setIsUploadOpen(true)}
+                        className="mt-6 text-indigo-600 font-bold hover:underline"
+                    >
+                        + Upload Materi Pertama
+                    </button>
+                )}
+            </div>
+        )}
 
-                    {/* Filter Bar & Actions */}
-                    <div className="flex flex-col xl:flex-row gap-4 mb-8 sticky top-0 z-30 bg-slate-50/95 backdrop-blur-sm py-4 border-b border-slate-200 xl:border-none xl:bg-transparent xl:static">
-                        
-                        {/* Search Input */}
-                        <div className="relative flex-1">
-                            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20}/>
-                            <input 
-                                type="text" 
-                                value={searchQuery}
-                                onChange={(e) => setSearchQuery(e.target.value)}
-                                placeholder="Cari materi pembelajaran..." 
-                                className="w-full pl-12 pr-4 py-3.5 rounded-xl border border-slate-200 shadow-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 outline-none text-slate-700 transition-all bg-white"
-                            />
-                        </div>
-                        
-                        {/* Category Filter */}
-                        <div className="flex gap-2 overflow-x-auto pb-2 xl:pb-0 scrollbar-hide">
-                            <button 
-                                onClick={() => setSelectedCategory('All')}
-                                className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedCategory === 'All' ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
-                            >
-                                Semua
-                            </button>
-                            {(Object.values(ModuleCategory) as string[]).map((cat) => (
-                                <button 
-                                    key={cat}
-                                    onClick={() => setSelectedCategory(cat)}
-                                    className={`px-5 py-2.5 rounded-xl text-sm font-bold whitespace-nowrap transition-all border ${selectedCategory === cat ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}
-                                >
-                                    {cat}
-                                </button>
-                            ))}
-                        </div>
-
-                        {/* Admin Action */}
-                        {role === 'ADMIN' && (
-                            <button 
-                                onClick={() => {
-                                    setEditingModule(undefined); 
-                                    setUploadTargetClass(undefined);
-                                    setIsUploadOpen(true);
-                                }}
-                                className="flex items-center justify-center gap-2 bg-slate-900 text-white px-6 py-3 rounded-xl font-bold shadow-lg hover:bg-slate-800 transition-all active:scale-95 shrink-0"
-                            >
-                                <PlusCircle size={20} />
-                                <span className="hidden sm:inline">Upload Materi</span>
-                            </button>
-                        )}
-                    </div>
-
-                    {/* Content Grid */}
-                    {filteredModules.length > 0 ? (
-                        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                            {filteredModules.map((module) => (
-                                <ModuleCard 
-                                    key={module.id} 
-                                    module={module} 
-                                    role={role}
-                                    onDelete={handleDeleteModule}
-                                    onEdit={(mod) => {
-                                        setEditingModule(mod);
-                                        setIsUploadOpen(true);
-                                    }}
-                                    onQuizSubmit={handleQuizSubmit}
-                                />
-                            ))}
-                        </div>
-                    ) : (
-                        <div className="text-center py-20 bg-white rounded-3xl border border-dashed border-slate-300">
-                            <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
-                                <BookOpen size={40} />
-                            </div>
-                            <h3 className="text-xl font-bold text-slate-800 mb-2">Tidak ada materi ditemukan</h3>
-                            <p className="text-slate-500 max-w-md mx-auto">
-                                {searchQuery || selectedCategory !== 'All' 
-                                    ? 'Coba ubah kata kunci pencarian atau kategori filter Anda.' 
-                                    : 'Belum ada materi yang diunggah oleh guru.'}
-                            </p>
-                            {(role === 'ADMIN' && !searchQuery) && (
-                                <button 
-                                    onClick={() => setIsUploadOpen(true)}
-                                    className="mt-6 text-indigo-600 font-bold hover:underline"
-                                >
-                                    + Upload Materi Pertama
-                                </button>
-                            )}
-                        </div>
-                    )}
-                </div>
-            )}
-        </main>
-      </div>
+      </main>
 
       {/* --- MODALS --- */}
 
@@ -908,10 +789,9 @@ const App: React.FC = () => {
       <UploadModal 
         isOpen={isUploadOpen} 
         onClose={() => setIsUploadOpen(false)}
-        onUpload={handleFormSubmit}
+        onUpload={handleUpload}
         classes={classNames}
         initialTargetClass={uploadTargetClass}
-        initialData={editingModule}
       />
 
       <StudentManager 
@@ -927,7 +807,6 @@ const App: React.FC = () => {
         onUpdateClasses={handleUpdateClasses}
         onUploadModule={(className) => {
             setUploadTargetClass(className);
-            setEditingModule(undefined); // Ensure fresh create mode
             setIsUploadOpen(true);
         }}
       />
