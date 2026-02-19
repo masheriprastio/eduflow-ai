@@ -2,7 +2,7 @@ import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
 import { Question } from "../types";
 import { supabase } from "./supabase";
 
-const MODEL_NAME = 'gemini-3-flash-preview';
+const MODEL_NAME = 'gemini-1.5-flash';
 const CONFIG_MODULE_ID = '00000000-0000-0000-0000-000000000000';
 const CONFIG_MODULE_TITLE = 'SYSTEM_CONFIG_DO_NOT_DELETE';
 
@@ -316,7 +316,7 @@ export const generateQuizQuestions = async (
 
   } catch (error) {
     console.error("Error generating quiz:", error);
-    return null;
+    throw error;
   }
 };
 
