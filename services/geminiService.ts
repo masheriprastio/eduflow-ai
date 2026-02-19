@@ -1,4 +1,4 @@
-import { GoogleGenAI } from "https://esm.sh/@google/genai@^1.41.0";
+import { GoogleGenerativeAI, Part } from "@google/generative-ai";
 import { Question } from "../types";
 import { supabase } from "./supabase";
 
@@ -36,7 +36,7 @@ const getEnv = (key: string, fallbackKey?: string): string => {
 // Helper to get AI client safely inside functions
 // Returns NULL if no key is found (triggering Mock Mode)
 // NOW ASYNC to allow fetching from DB if cache is empty
-const getAiClient = async (): Promise<GoogleGenAI | null> => {
+const getAiClient = async (): Promise<GoogleGenerativeAI | null> => {
   // 1. Coba gunakan Key dari Database (Global Setting yang diset Admin - Cache In-Memory)
   let apiKey = dbApiKey || '';
 
@@ -105,7 +105,7 @@ const getAiClient = async (): Promise<GoogleGenAI | null> => {
       return null;
   }
   
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenerativeAI(apiKey);
 };
 
 // --- MOCK GENERATORS (FALLBACKS) ---
@@ -116,10 +116,10 @@ const mockDelay = () => new Promise(resolve => setTimeout(resolve, 1500));
  * Generates a summary and tags for a learning module.
  */
 export const generateModuleMetadata = async (title: string, contentSnippet: string) => {
-  const ai = await getAiClient();
+  const genAI = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
-  if (!ai) {
+  if (!genAI) {
     await mockDelay();
     return {
       summary: `(Mode Demo AI) Ini adalah ringkasan otomatis simulasi untuk materi "${title}". Masukkan API Key di menu Pengaturan (ikon gerigi) untuk hasil nyata.`,
@@ -143,15 +143,15 @@ export const generateModuleMetadata = async (title: string, contentSnippet: stri
       }
     `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      }
+    const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        generationConfig: { responseMimeType: "application/json" }
     });
 
-    const text = response.text;
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
+    const text = response.text();
+
     if (!text) return null;
     return JSON.parse(text) as { summary: string; tags: string[] };
   } catch (error) {
@@ -175,10 +175,10 @@ export const generateQuizQuestions = async (
   count: number,
   files?: { mimeType: string; data: string }[]
 ): Promise<Question[] | null> => {
-  const ai = await getAiClient();
+  const genAI = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
-  if (!ai) {
+  if (!genAI) {
     await mockDelay();
     const mockQuestions: Question[] = Array.from({ length: count }).map((_, i) => ({
       id: `mock-q-${Date.now()}-${i}`,
@@ -274,7 +274,7 @@ export const generateQuizQuestions = async (
       ${formatInstruction}
     `;
 
-    const parts: any[] = [];
+    const parts: Part[] = [];
     if (files && files.length > 0) {
       files.forEach(f => {
         parts.push({
@@ -287,16 +287,18 @@ export const generateQuizQuestions = async (
     }
     parts.push({ text: promptText });
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: { parts },
-      config: {
-        responseMimeType: "application/json",
-        temperature: 0.5, // Lower temperature to be more deterministic/relevant
-      }
+    const model = genAI.getGenerativeModel({
+        model: MODEL_NAME,
+        generationConfig: {
+            responseMimeType: "application/json",
+            temperature: 0.5, // Lower temperature to be more deterministic/relevant
+        }
     });
 
-    const text = response.text;
+    const result = await model.generateContent(parts);
+    const response = await result.response;
+    const text = response.text();
+
     if (!text) return null;
     
     const parsedQuestions = JSON.parse(text);
@@ -324,10 +326,10 @@ export const generateQuizQuestions = async (
  * Allows a student to ask a question about a specific module.
  */
 export const askAboutModule = async (moduleTitle: string, moduleContext: string, question: string) => {
-  const ai = await getAiClient();
+  const genAI = await getAiClient();
 
   // MOCK MODE (Jika API Key tidak ada)
-  if (!ai) {
+  if (!genAI) {
     await mockDelay();
     return `(Tutor AI Demo) Halo! Sepertinya Admin/Guru belum mengonfigurasi API Key di sistem. Harap hubungi guru Anda agar saya bisa aktif.`;
   }
@@ -341,12 +343,11 @@ export const askAboutModule = async (moduleTitle: string, moduleContext: string,
       Jawablah dengan bahasa Indonesia yang mudah dimengerti siswa. Maksimal 3 paragraf pendek.
     `;
 
-    const response = await ai.models.generateContent({
-      model: MODEL_NAME,
-      contents: prompt,
-    });
+    const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+    const result = await model.generateContent(prompt);
+    const response = await result.response;
 
-    return response.text;
+    return response.text();
   } catch (error) {
     console.error("Error asking Gemini:", error);
     return "Maaf, saya sedang mengalami gangguan koneksi ke otak AI saya (Mungkin API Key tidak valid atau kuota habis). Coba cek pengaturan key Anda.";
