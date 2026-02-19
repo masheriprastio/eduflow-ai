@@ -299,9 +299,26 @@ export const generateQuizQuestions = async (
     const response = await result.response;
     const text = response.text();
 
-    if (!text) return null;
+    if (!text) throw new Error("Respon AI kosong.");
     
-    const parsedQuestions = JSON.parse(text);
+    let parsedQuestions;
+    try {
+        // Bersihkan markdown code block jika ada (kadang AI membungkus JSON dengan ```json ... ```)
+        const cleanText = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        parsedQuestions = JSON.parse(cleanText);
+    } catch (e) {
+        console.error("Gagal parse JSON dari AI:", text);
+        throw new Error("Format respon AI tidak valid. Coba lagi.");
+    }
+
+    if (!Array.isArray(parsedQuestions)) {
+        // Handle jika AI mengembalikan object tunggal, bukan array
+        if (typeof parsedQuestions === 'object' && parsedQuestions !== null) {
+             parsedQuestions = [parsedQuestions];
+        } else {
+             throw new Error("Format respon AI tidak valid (Bukan array).");
+        }
+    }
 
     // Post-process: Simple mapping without image generation logic
     const processedQuestions = parsedQuestions.map((q: any) => {
@@ -316,8 +333,18 @@ export const generateQuizQuestions = async (
 
     return processedQuestions;
 
-  } catch (error) {
+  } catch (error: any) {
     console.error("Error generating quiz:", error);
+
+    // Deteksi error kuota spesifik
+    if (error.message?.includes("429") || error.message?.includes("Quota") || error.message?.includes("Resource has been exhausted")) {
+        throw new Error("Kuota API Habis (Rate Limit). Silakan tunggu beberapa saat, kurangi jumlah request, atau ganti API Key.");
+    }
+
+    if (error.message?.includes("Safety")) {
+        throw new Error("Konten diblokir oleh filter keamanan AI. Coba ubah topik atau deskripsi materi.");
+    }
+
     throw error;
   }
 };

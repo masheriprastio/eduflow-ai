@@ -151,7 +151,7 @@ const QuizManager: React.FC<QuizManagerProps> = ({ isOpen, onClose, modules, onU
     setIsGeneratingAi(true);
     
     // Combine context from ALL selected modules
-    const sourceModules = modules.filter(m => selectedSourceModules.includes(m.id));
+    const sourceModules = (modules || []).filter(m => selectedSourceModules.includes(m.id));
     const combinedTitles = sourceModules.map(m => m.title).join(', ');
     
     let combinedContext = `Gabungan Materi dari: ${combinedTitles}.\n\n`;

@@ -563,7 +563,7 @@ const App: React.FC = () => {
   // --- RENDER HELPERS ---
 
   const filteredModules = useMemo(() => {
-    return modules.filter(m => {
+    return (modules || []).filter(m => {
         // EXCLUDE SYSTEM CONFIG MODULE (STRICT CHECK)
         if (m.id === CONFIG_MODULE_ID || m.title === CONFIG_MODULE_TITLE || m.tags?.includes('hidden')) return false;
 
